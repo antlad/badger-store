@@ -22,14 +22,14 @@ type Index struct {
 type IndexesDesc map[string]IndexType
 
 type ItemMeta[T any] interface {
-	ID(T) ItemID
-	IndexValue(t T, indexName string) []byte
+	ID(*T) ItemID
+	IndexValue(t *T, indexName string) []byte
 }
 
 type Meta[View any, Store any] interface {
 	TableName() string
-	TakeView([]byte) (View, error)
-	Serialize(Store) ([]byte, error)
+	TakeView([]byte) (*View, error)
+	Serialize(*Store) ([]byte, error)
 	Indexes() IndexesDesc
 	StoreMeta() ItemMeta[Store]
 	ViewMeta() ItemMeta[View]
@@ -62,7 +62,7 @@ func NewHandler[View any, Store any](db *badger.DB, meta Meta[View, Store]) *Han
 	}
 }
 
-func (b *Handler[View, Store]) PutItem(t Transaction, item Store) error {
+func (b *Handler[View, Store]) PutItem(t Transaction, item *Store) error {
 	r := t.(*dbTxn)
 	txn := r.raw
 	data, err := b.meta.Serialize(item)
@@ -102,7 +102,7 @@ func (b *Handler[View, Store]) matchIndexKey(name string, indexValue []byte, id 
 	return append(p, id...)
 }
 
-func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item Store) error {
+func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) error {
 	for k, v := range b.indexes {
 		if v != Unique {
 			continue
@@ -119,7 +119,7 @@ func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item Store) erro
 	return nil
 }
 
-func (b *Handler[View, Store]) onPut(tx *badger.Txn, item Store) error {
+func (b *Handler[View, Store]) onPut(tx *badger.Txn, item *Store) error {
 	for k, v := range b.indexes {
 		idxValue := b.storeMeta.IndexValue(item, k)
 		id := b.storeMeta.ID(item)
@@ -137,7 +137,7 @@ func (b *Handler[View, Store]) onPut(tx *badger.Txn, item Store) error {
 	return nil
 }
 
-func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item View) error {
+func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 	for k, v := range b.indexes {
 		id := b.viewMeta.ID(item)
 		idxValue := b.viewMeta.IndexValue(item, k)
@@ -155,7 +155,7 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item View) error {
 	return nil
 }
 
-func (b *Handler[View, Store]) GetByUniqueIndex(t Transaction, indexName string, indexValue []byte, cb func(view View)) error {
+func (b *Handler[View, Store]) GetByUniqueIndex(t Transaction, indexName string, indexValue []byte, cb func(view *View)) error {
 	txn := t.(*dbTxn).raw
 	indexItem, err := txn.Get(b.uniqueIndexKey(indexName, indexValue))
 	if err != nil {
@@ -184,7 +184,7 @@ func iteratorOpts(prefix []byte) badger.IteratorOptions {
 	return opts
 }
 
-func (b *Handler[View, Store]) IterateByMatchIndex(t Transaction, indexName string, indexKey []byte, cb func(view View) error) error {
+func (b *Handler[View, Store]) IterateByMatchIndex(t Transaction, indexName string, indexKey []byte, cb func(view *View) error) error {
 	txn := t.(*dbTxn).raw
 
 	it := txn.NewIterator(iteratorOpts(b.matchIndexPrefix(indexName, indexKey)))
@@ -215,7 +215,7 @@ func (b *Handler[View, Store]) IterateByMatchIndex(t Transaction, indexName stri
 	return nil
 }
 
-func (b *Handler[View, Store]) ViewItemByID(t Transaction, id ItemID, cb func(view View)) error {
+func (b *Handler[View, Store]) ViewItemByID(t Transaction, id ItemID, cb func(view *View)) error {
 	txn := t.(*dbTxn).raw
 	item, err := txn.Get(b.itemKey(id))
 	if err != nil {

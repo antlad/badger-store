@@ -1,0 +1,9 @@
+namespace ds;
+
+table Human {
+    id:[ubyte];
+    age:int;
+    name:string;
+    email:string;
+    status:string;
+}
