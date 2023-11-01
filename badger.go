@@ -8,24 +8,25 @@ type BadgerDB struct {
 	b *badger.DB
 }
 
-type dbTxn struct {
+type Txn struct {
 	raw  *badger.Txn
 	refs []interface{}
 }
 
-func (tx *dbTxn) appendRefs(ref interface{}) {
+func (tx *Txn) appendRefs(ref interface{}) {
 	tx.refs = append(tx.refs, ref)
 }
 
-func (b *BadgerDB) View(f func(tx Transaction) error) error {
+func (b *BadgerDB) View(f func(tx *Txn) error) error {
 	return b.b.View(func(txn *badger.Txn) error {
-		return f(Transaction(&dbTxn{raw: txn}))
+		return f(&Txn{raw: txn})
 	})
 }
 
-func (b *BadgerDB) Update(f func(tx Transaction) error) error {
+func (b *BadgerDB) Update(f func(tx *Txn) error) error {
+
 	err := b.b.Update(func(txn *badger.Txn) error {
-		return f(Transaction(&dbTxn{raw: txn}))
+		return f(&Txn{raw: txn})
 	})
 	return err
 }
