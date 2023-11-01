@@ -43,11 +43,6 @@ type Handler[View any, Store any] struct {
 	indexes   IndexesDesc
 }
 
-var (
-	ErrStopIteration             = errors.New("stop iteration")
-	ErrUniqueConstraintViolation = errors.New("unique constraint violation")
-)
-
 func IsStopIteration(err error) bool {
 	return errors.Is(err, ErrStopIteration)
 }
@@ -107,8 +102,12 @@ func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) err
 		if v != Unique {
 			continue
 		}
+		iv := b.storeMeta.IndexValue(item, k)
+		if len(iv) == 0 {
+			return ErrEmptyIndexValue
+		}
 
-		_, err := tx.Get(b.uniqueIndexKey(k, b.storeMeta.IndexValue(item, k)))
+		_, err := tx.Get(b.uniqueIndexKey(k, iv))
 		if err != nil {
 			if errors.Is(err, badger.ErrKeyNotFound) {
 				continue
@@ -121,7 +120,13 @@ func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) err
 
 func (b *Handler[View, Store]) onPut(tx *badger.Txn, item *Store) error {
 	for k, v := range b.indexes {
+
 		idxValue := b.storeMeta.IndexValue(item, k)
+
+		if len(idxValue) == 0 {
+			return ErrEmptyIndexValue
+		}
+
 		id := b.storeMeta.ID(item)
 		var err error
 		switch v {
@@ -141,6 +146,9 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 	for k, v := range b.indexes {
 		id := b.viewMeta.ID(item)
 		idxValue := b.viewMeta.IndexValue(item, k)
+		if len(idxValue) == 0 {
+			return ErrEmptyIndexValue
+		}
 		var err error
 		switch v {
 		case Unique:
@@ -156,6 +164,10 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 }
 
 func (b *Handler[View, Store]) GetByUniqueIndex(t Transaction, indexName string, indexValue []byte, cb func(view *View)) error {
+	if len(indexValue) == 0 {
+		return ErrEmptyIndexValue
+	}
+
 	txn := t.(*dbTxn).raw
 	indexItem, err := txn.Get(b.uniqueIndexKey(indexName, indexValue))
 	if err != nil {

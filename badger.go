@@ -30,10 +30,15 @@ func (b *BadgerDB) Update(f func(tx Transaction) error) error {
 	return err
 }
 
+func (b *BadgerDB) Reset() error {
+	return b.b.DropAll()
+}
+
 func (b *BadgerDB) Close() error {
 	if b.b != nil {
 		return b.b.Close()
 	}
+
 	return nil
 }
 
