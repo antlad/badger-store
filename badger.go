@@ -13,6 +13,10 @@ type dbTxn struct {
 	refs []interface{}
 }
 
+func (tx *dbTxn) appendRefs(ref interface{}) {
+	tx.refs = append(tx.refs, ref)
+}
+
 func (b *BadgerDB) View(f func(tx Transaction) error) error {
 	return b.b.View(func(txn *badger.Txn) error {
 		return f(Transaction(&dbTxn{raw: txn}))
