@@ -19,6 +19,24 @@ const (
 	statusIDx = "xSt"
 )
 
+func NewBadgerDB(folder string) (*BadgerDB, error) {
+	opts := badger.DefaultOptions(folder)
+	opts.NumVersionsToKeep = 0
+	opts.CompactL0OnClose = true
+	opts.NumLevelZeroTables = 1
+	opts.NumLevelZeroTablesStall = 2
+	opts.ValueLogFileSize = 1024 * 1024 * 10
+
+	b, err := badger.Open(opts)
+	if err != nil {
+		return nil, err
+	}
+	d := &BadgerDB{
+		DB: b,
+	}
+	return d, nil
+}
+
 func prepareDB(t *testing.T) (*BadgerDB, *Handler[ds.Human, test.Human]) {
 	d, err := NewBadgerDB("/tmp/store_test")
 	require.NoError(t, err)

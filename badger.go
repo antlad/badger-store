@@ -42,22 +42,3 @@ func (b *BadgerDB) Close() error {
 
 	return nil
 }
-
-func NewBadgerDB(folder string) (*BadgerDB, error) {
-	opts := badger.DefaultOptions(folder)
-	// https://github.com/dgraph-io/badger/issues/1297
-	opts.NumVersionsToKeep = 0
-	opts.CompactL0OnClose = true
-	opts.NumLevelZeroTables = 1
-	opts.NumLevelZeroTablesStall = 2
-	opts.ValueLogFileSize = 1024 * 1024 * 10
-
-	b, err := badger.Open(opts)
-	if err != nil {
-		return nil, err
-	}
-	d := &BadgerDB{
-		DB: b,
-	}
-	return d, nil
-}
