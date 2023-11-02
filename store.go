@@ -111,7 +111,7 @@ func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) err
 		}
 		iv := b.storeMeta.IndexValue(item, k)
 		if len(iv) == 0 {
-			return ErrEmptyIndexValue
+			continue
 		}
 		uID := b.uniqueIndexKey(k, iv)
 		existing, err := tx.Get(uID)
@@ -155,7 +155,7 @@ func (b *Handler[View, Store]) beforePut(tx *badger.Txn, item *Store) error {
 		for k, v := range b.indexes {
 			idxValue := b.viewMeta.IndexValue(view, k)
 			if len(idxValue) == 0 {
-				return ErrEmptyIndexValue
+				continue
 			}
 
 			switch v {
@@ -178,9 +178,8 @@ func (b *Handler[View, Store]) afterPut(tx *badger.Txn, item *Store) error {
 	for k, v := range b.indexes {
 
 		idxValue := b.storeMeta.IndexValue(item, k)
-
 		if len(idxValue) == 0 {
-			return ErrEmptyIndexValue
+			continue
 		}
 
 		id := b.storeMeta.ID(item)
@@ -205,7 +204,7 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 		id := b.viewMeta.ID(item)
 		idxValue := b.viewMeta.IndexValue(item, k)
 		if len(idxValue) == 0 {
-			return ErrEmptyIndexValue
+			continue
 		}
 		var err error
 		switch v {
