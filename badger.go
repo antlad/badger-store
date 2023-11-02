@@ -5,7 +5,7 @@ import (
 )
 
 type BadgerDB struct {
-	b *badger.DB
+	DB *badger.DB
 }
 
 type Txn struct {
@@ -18,32 +18,32 @@ func (tx *Txn) appendRefs(ref interface{}) {
 }
 
 func (b *BadgerDB) View(f func(tx *Txn) error) error {
-	return b.b.View(func(txn *badger.Txn) error {
+	return b.DB.View(func(txn *badger.Txn) error {
 		return f(&Txn{raw: txn})
 	})
 }
 
 func (b *BadgerDB) Update(f func(tx *Txn) error) error {
 
-	err := b.b.Update(func(txn *badger.Txn) error {
+	err := b.DB.Update(func(txn *badger.Txn) error {
 		return f(&Txn{raw: txn})
 	})
 	return err
 }
 
 func (b *BadgerDB) Reset() error {
-	return b.b.DropAll()
+	return b.DB.DropAll()
 }
 
 func (b *BadgerDB) Close() error {
-	if b.b != nil {
-		return b.b.Close()
+	if b.DB != nil {
+		return b.DB.Close()
 	}
 
 	return nil
 }
 
-func NewDB(folder string) (*BadgerDB, error) {
+func NewBadgerDB(folder string) (*BadgerDB, error) {
 	opts := badger.DefaultOptions(folder)
 	// https://github.com/dgraph-io/badger/issues/1297
 	opts.NumVersionsToKeep = 0
@@ -57,7 +57,7 @@ func NewDB(folder string) (*BadgerDB, error) {
 		return nil, err
 	}
 	d := &BadgerDB{
-		b: b,
+		DB: b,
 	}
 	return d, nil
 }

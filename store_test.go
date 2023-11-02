@@ -20,11 +20,11 @@ const (
 )
 
 func prepareDB(t *testing.T) (*BadgerDB, *Handler[ds.Human, test.Human]) {
-	d, err := NewDB("/tmp/store_test")
+	d, err := NewBadgerDB("/tmp/store_test")
 	require.NoError(t, err)
 	err = d.Reset()
 	require.NoError(t, err)
-	h := NewHandler[ds.Human, test.Human](d.b, &HumanTable{builder: flatbuffers.NewBuilder(0xFFF)})
+	h := NewHandler[ds.Human, test.Human](d.DB, &HumanTable{builder: flatbuffers.NewBuilder(0xFFF)})
 	return d, h
 }
 
