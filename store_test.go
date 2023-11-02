@@ -2,8 +2,8 @@ package badger_store
 
 import (
 	"fmt"
-	"github.com/antlad/badger-store.git/test"
-	"github.com/antlad/badger-store.git/test/ds"
+	"github.com/antlad/badger-store/test"
+	"github.com/antlad/badger-store/test/ds"
 	"github.com/dgraph-io/badger/v4"
 	flatbuffers "github.com/google/flatbuffers/go"
 	"testing"

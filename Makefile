@@ -5,4 +5,4 @@ coverage:
 
 .PHONY: test
 test:
-	go test -parallel=10 $(PWD)/... -coverprofile=cover.out -timeout=$(TEST_TIMEOUT)
+	go test -parallel=10 $(PWD)/... -coverprofile=cover.out

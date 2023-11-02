@@ -1,4 +1,4 @@
-module github.com/antlad/badger-store.git
+module github.com/antlad/badger-store
 
 go 1.21.3
 

@@ -1,7 +1,7 @@
 package test
 
 import (
-	"github.com/antlad/badger-store.git/test/ds"
+	"github.com/antlad/badger-store/test/ds"
 	flatbuffers "github.com/google/flatbuffers/go"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
