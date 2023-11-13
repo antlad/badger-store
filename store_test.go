@@ -2,15 +2,14 @@ package badger_store
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/antlad/badger-store/test"
 	"github.com/antlad/badger-store/test/ds"
 	"github.com/dgraph-io/badger/v4"
 	flatbuffers "github.com/google/flatbuffers/go"
-	"testing"
-
-	"github.com/stretchr/testify/require"
-
 	uuid "github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
 const (

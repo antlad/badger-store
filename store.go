@@ -3,6 +3,7 @@ package badger_store
 import (
 	"bytes"
 	"errors"
+
 	"github.com/dgraph-io/badger/v4"
 )
 
