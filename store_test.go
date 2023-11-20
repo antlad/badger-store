@@ -146,13 +146,13 @@ func TestBase(t *testing.T) {
 	defer d.Close()
 
 	h1 := createHuman(1)
-	err := d.Update(func(tx *Txn) error {
+	err := d.Update(func(tx Txn) error {
 		return h.PutItem(tx, &h1)
 	})
 	require.NoError(t, err)
 
 	found := false
-	err = d.View(func(tx *Txn) error {
+	err = d.View(func(tx Txn) error {
 		return h.GetByID(tx, h1.Id[:], func(view *ds.Human) {
 			found = true
 			checkViewMatch(t, h1, view)
@@ -169,7 +169,7 @@ func TestMatch(t *testing.T) {
 
 	items := make([]test.Human, 0, 100)
 
-	err := d.Update(func(tx *Txn) error {
+	err := d.Update(func(tx Txn) error {
 		for i := 0; i < 100; i++ {
 			hm := createHuman(i)
 			items = append(items, hm)
@@ -182,7 +182,7 @@ func TestMatch(t *testing.T) {
 	h1 := items[42]
 	expectedCount := 50
 
-	err = d.View(func(tx *Txn) error {
+	err = d.View(func(tx Txn) error {
 		found := false
 		err = h.GetByID(tx, h1.Id[:], func(view *ds.Human) {
 			checkViewMatch(t, h1, view)
@@ -211,7 +211,7 @@ func TestMatch(t *testing.T) {
 		t.Log("delete id=", v.Id.String())
 	}
 
-	err = d.Update(func(tx *Txn) error {
+	err = d.Update(func(tx Txn) error {
 		err = h.DeleteItems(tx, IDs)
 
 		require.NoError(t, err)
@@ -219,7 +219,7 @@ func TestMatch(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = d.View(func(tx *Txn) error {
+	err = d.View(func(tx Txn) error {
 		found := false
 		err = h.GetByID(tx, h1.Id[:], func(view *ds.Human) {
 			checkViewMatch(t, h1, view)
@@ -252,12 +252,12 @@ func TestUniqueConstrain(t *testing.T) {
 	h1 := createHuman(0)
 	h2 := createHuman(1)
 	h2.Email = h1.Email
-	err := d.Update(func(tx *Txn) error {
+	err := d.Update(func(tx Txn) error {
 		return h.PutItem(tx, &h1)
 	})
 	require.NoError(t, err)
 
-	err = d.Update(func(tx *Txn) error {
+	err = d.Update(func(tx Txn) error {
 		return h.PutItem(tx, &h2)
 	})
 	require.Error(t, err)
@@ -268,7 +268,7 @@ func TestIndexUpdate(t *testing.T) {
 	defer d.Close()
 
 	items := make([]test.Human, 0, 10)
-	err := d.Update(func(tx *Txn) error {
+	err := d.Update(func(tx Txn) error {
 		for i := 0; i < 10; i++ {
 			hm := createHuman(i)
 			items = append(items, hm)
@@ -278,7 +278,7 @@ func TestIndexUpdate(t *testing.T) {
 		return nil
 	})
 
-	err = d.View(func(tx *Txn) error {
+	err = d.View(func(tx Txn) error {
 		err = h.GetByUniqueIndex(tx, nameIDx, []byte("missing"), func(view *ds.Human) {
 		})
 		require.ErrorIs(t, err, badger.ErrKeyNotFound)
@@ -295,7 +295,7 @@ func TestIndexUpdate(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = d.Update(func(tx *Txn) error {
+	err = d.Update(func(tx Txn) error {
 		h1 := items[3]
 		original := h1
 		err = h.GetByUniqueIndex(tx, emailIDx, []byte(h1.Email), func(view *ds.Human) {

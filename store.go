@@ -59,12 +59,12 @@ func NewHandler[View any, Store any](db *badger.DB, meta Meta[View, Store]) *Han
 	}
 }
 
-func (b *Handler[View, Store]) PutItem(t *Txn, item *Store) error {
-	txn := t.raw
-	if err := b.checkConstraints(txn, item); err != nil {
+func (b *Handler[View, Store]) PutItem(t Txn, item *Store) error {
+	txn := t.(*txnImpl)
+	if err := b.checkConstraints(txn.raw, item); err != nil {
 		return err
 	}
-	if err := b.beforePut(t.raw, item); err != nil {
+	if err := b.beforePut(txn.raw, item); err != nil {
 		return err
 	}
 
@@ -73,11 +73,12 @@ func (b *Handler[View, Store]) PutItem(t *Txn, item *Store) error {
 		return err
 	}
 
-	if err = txn.Set(b.itemKey(b.storeMeta.ID(item)), data); err != nil {
+	if err = txn.raw.Set(b.itemKey(b.storeMeta.ID(item)), data); err != nil {
 		return err
 	}
-	t.refs = append(t.refs, data)
-	return b.afterPut(txn, item)
+
+	txn.refs = append(txn.refs, data)
+	return b.afterPut(txn.raw, item)
 }
 
 func (b *Handler[View, Store]) itemKey(id ItemID) []byte {
@@ -223,18 +224,18 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 	return nil
 }
 
-func (b *Handler[View, Store]) GetByUniqueIndex(t *Txn, indexName string, indexValue []byte, cb func(view *View)) error {
+func (b *Handler[View, Store]) GetByUniqueIndex(t Txn, indexName string, indexValue []byte, cb func(view *View)) error {
 	if len(indexValue) == 0 {
 		return ErrEmptyIndexValue
 	}
 
-	txn := t.raw
-	indexItem, err := txn.Get(b.uniqueIndexKey(indexName, indexValue))
+	txn := t.(*txnImpl)
+	indexItem, err := txn.raw.Get(b.uniqueIndexKey(indexName, indexValue))
 	if err != nil {
 		return err
 	}
 	err = indexItem.Value(func(val []byte) error {
-		item, err := txn.Get(b.itemKey(val))
+		item, err := txn.raw.Get(b.itemKey(val))
 		if err != nil {
 			return err
 		}
@@ -256,16 +257,16 @@ func iteratorOpts(prefix []byte) badger.IteratorOptions {
 	return opts
 }
 
-func (b *Handler[View, Store]) IterateByMatchIndex(t *Txn, indexName string, indexKey []byte, cb func(view *View) error) error {
-	txn := t.raw
+func (b *Handler[View, Store]) IterateByMatchIndex(t Txn, indexName string, indexKey []byte, cb func(view *View) error) error {
+	txn := t.(*txnImpl)
 
 	matchPrefix := b.matchIndexPrefix(indexName, indexKey)
-	it := txn.NewIterator(iteratorOpts(matchPrefix))
+	it := txn.raw.NewIterator(iteratorOpts(matchPrefix))
 	defer it.Close()
 
 	for it.Rewind(); it.Valid(); it.Next() {
 		err := it.Item().Value(func(val []byte) error {
-			item, err := txn.Get(b.itemKey(val))
+			item, err := txn.raw.Get(b.itemKey(val))
 			if err != nil {
 				return err
 			}
@@ -288,9 +289,9 @@ func (b *Handler[View, Store]) IterateByMatchIndex(t *Txn, indexName string, ind
 	return nil
 }
 
-func (b *Handler[View, Store]) GetByID(t *Txn, id ItemID, cb func(view *View)) error {
-	txn := t.raw
-	item, err := txn.Get(b.itemKey(id))
+func (b *Handler[View, Store]) GetByID(t Txn, id ItemID, cb func(view *View)) error {
+	txn := t.(*txnImpl)
+	item, err := txn.raw.Get(b.itemKey(id))
 	if err != nil {
 		return err
 	}
@@ -308,7 +309,7 @@ func (b *Handler[View, Store]) DeleteTable() error {
 	return b.db.DropPrefix(b.tableName())
 }
 
-func (b *Handler[View, Store]) DeleteItems(t *Txn, items []ItemID) error {
+func (b *Handler[View, Store]) DeleteItems(t Txn, items []ItemID) error {
 	for _, e := range items {
 		if err := b.DeleteItem(t, e); err != nil {
 			return nil
@@ -317,11 +318,11 @@ func (b *Handler[View, Store]) DeleteItems(t *Txn, items []ItemID) error {
 	return nil
 }
 
-func (b *Handler[View, Store]) DeleteItem(t *Txn, id ItemID) error {
-	txn := t.raw
+func (b *Handler[View, Store]) DeleteItem(t Txn, id ItemID) error {
+	txn := t.(*txnImpl)
 
 	if len(b.indexes) > 0 {
-		item, err := txn.Get(b.itemKey(id))
+		item, err := txn.raw.Get(b.itemKey(id))
 		if err != nil {
 			return err
 		}
@@ -330,11 +331,11 @@ func (b *Handler[View, Store]) DeleteItem(t *Txn, id ItemID) error {
 			if err != nil {
 				return err
 			}
-			return b.onDelete(txn, v)
+			return b.onDelete(txn.raw, v)
 		})
 	}
 
-	if err := txn.Delete(id); err != nil {
+	if err := txn.raw.Delete(id); err != nil {
 		return err
 	}
 
