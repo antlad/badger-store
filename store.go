@@ -318,6 +318,18 @@ func (b *Handler[View, Store]) DeleteItems(t Txn, items []ItemID) error {
 	return nil
 }
 
+func (b *Handler[View, Store]) DeleteByMatchingIndex(t Txn, indexName string, indexKey []byte) error {
+	var IDs []ItemID
+	if err := b.IterateByMatchIndex(t, indexName, indexKey, func(view *View) error {
+		IDs = append(IDs, b.viewMeta.ID(view))
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return b.DeleteItems(t, IDs)
+}
+
 func (b *Handler[View, Store]) DeleteItem(t Txn, id ItemID) error {
 	txn := t.(*txnImpl)
 
