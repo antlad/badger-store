@@ -82,27 +82,36 @@ func (b *Handler[View, Store]) PutItem(t Txn, item *Store) error {
 }
 
 func (b *Handler[View, Store]) itemKey(id ItemID) []byte {
-	return append(b.tableName(), id...)
+	r := append(b.tableName(), []byte{'v'}...)
+	return append(r, id...)
 }
 
 func (b *Handler[View, Store]) tableName() []byte {
 	return []byte(b.meta.TableName())
 }
 
+func (b *Handler[View, Store]) valuesPrefix() []byte {
+	return append(b.tableName(), []byte{'v'}...)
+}
+
 func (b *Handler[View, Store]) indexPrefix(name string) []byte {
-	return append(b.tableName(), []byte(name)...)
+	r := append(b.tableName(), []byte{'i'}...)
+	return append(r, []byte(name)...)
 }
 
 func (b *Handler[View, Store]) uniqueIndexKey(name string, indexValue []byte) []byte {
-	return append(b.indexPrefix(name), indexValue...)
+	r := append(b.indexPrefix(name), 'u')
+	return append(r, indexValue...)
 }
 
 func (b *Handler[View, Store]) matchIndexPrefix(name string, indexValue []byte) []byte {
-	return append(b.indexPrefix(name), indexValue...)
+	r := append(b.indexPrefix(name), 'm')
+	return append(r, indexValue...)
 }
 
 func (b *Handler[View, Store]) matchIndexKey(name string, indexValue []byte, id ItemID) []byte {
-	p := append(b.indexPrefix(name), indexValue...)
+	r := append(b.indexPrefix(name), 'm')
+	p := append(r, indexValue...)
 	return append(p, id...)
 }
 
@@ -255,6 +264,31 @@ func iteratorOpts(prefix []byte) badger.IteratorOptions {
 	opts := badger.DefaultIteratorOptions
 	opts.Prefix = prefix
 	return opts
+}
+
+func (b *Handler[View, Store]) Iterate(t Txn, cb func(view *View) error) error {
+	txn := t.(*txnImpl)
+
+	it := txn.raw.NewIterator(iteratorOpts(b.valuesPrefix()))
+	defer it.Close()
+
+	for it.Rewind(); it.Valid(); it.Next() {
+		err := it.Item().Value(func(val []byte) error {
+			v, err := b.meta.TakeView(val)
+			if err != nil {
+				return err
+			}
+			return cb(v)
+		})
+		if err != nil {
+			if IsStopIteration(err) {
+				break
+			}
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (b *Handler[View, Store]) IterateByMatchIndex(t Txn, indexName string, indexKey []byte, cb func(view *View) error) error {

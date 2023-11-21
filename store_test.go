@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	emailIDx  = "xMl"
-	nameIDx   = "xNm"
-	statusIDx = "xSt"
+	emailIDx  = "ml"
+	nameIDx   = "nm"
+	statusIDx = "st"
 )
 
 func NewBadgerDB(folder string) (*BadgerDB, error) {
@@ -178,6 +178,17 @@ func TestMatch(t *testing.T) {
 		}
 		return nil
 	})
+	require.NoError(t, err)
+
+	count := 0
+	err = d.View(func(tx Txn) error {
+		return h.Iterate(tx, func(view *ds.Human) error {
+			count++
+			return nil
+		})
+	})
+	require.NoError(t, err)
+	require.Equal(t, 100, count)
 
 	h1 := items[42]
 	expectedCount := 50
