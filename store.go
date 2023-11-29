@@ -59,7 +59,7 @@ func NewHandler[View any, Store any](db *badger.DB, meta Meta[View, Store]) *Han
 	}
 }
 
-func (b *Handler[View, Store]) PutItem(t Txn, item *Store) error {
+func (b *Handler[View, Store]) PutItem(t interface{}, item *Store) error {
 	txn := t.(*txnImpl)
 	if err := b.checkConstraints(txn.raw, item); err != nil {
 		return err
@@ -233,7 +233,7 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 	return nil
 }
 
-func (b *Handler[View, Store]) GetByUniqueIndex(t Txn, indexName string, indexValue []byte, cb func(view *View)) error {
+func (b *Handler[View, Store]) GetByUniqueIndex(t interface{}, indexName string, indexValue []byte, cb func(view *View)) error {
 	if len(indexValue) == 0 {
 		return ErrEmptyIndexValue
 	}
@@ -266,7 +266,7 @@ func iteratorOpts(prefix []byte) badger.IteratorOptions {
 	return opts
 }
 
-func (b *Handler[View, Store]) Iterate(t Txn, cb func(view *View) error) error {
+func (b *Handler[View, Store]) Iterate(t interface{}, cb func(view *View) error) error {
 	txn := t.(*txnImpl)
 
 	it := txn.raw.NewIterator(iteratorOpts(b.valuesPrefix()))
@@ -291,7 +291,7 @@ func (b *Handler[View, Store]) Iterate(t Txn, cb func(view *View) error) error {
 	return nil
 }
 
-func (b *Handler[View, Store]) IterateByMatchIndex(t Txn, indexName string, indexKey []byte, cb func(view *View) error) error {
+func (b *Handler[View, Store]) IterateByMatchIndex(t interface{}, indexName string, indexKey []byte, cb func(view *View) error) error {
 	txn := t.(*txnImpl)
 
 	matchPrefix := b.matchIndexPrefix(indexName, indexKey)
@@ -323,7 +323,7 @@ func (b *Handler[View, Store]) IterateByMatchIndex(t Txn, indexName string, inde
 	return nil
 }
 
-func (b *Handler[View, Store]) GetByID(t Txn, id ItemID, cb func(view *View) error) error {
+func (b *Handler[View, Store]) GetByID(t interface{}, id ItemID, cb func(view *View) error) error {
 	txn := t.(*txnImpl)
 	item, err := txn.raw.Get(b.itemKey(id))
 	if err != nil {
@@ -342,7 +342,7 @@ func (b *Handler[View, Store]) DeleteTable() error {
 	return b.db.DropPrefix(b.tableName())
 }
 
-func (b *Handler[View, Store]) DeleteItems(t Txn, items []ItemID) error {
+func (b *Handler[View, Store]) DeleteItems(t interface{}, items []ItemID) error {
 	for _, e := range items {
 		if err := b.DeleteItem(t, e); err != nil {
 			return nil
@@ -351,7 +351,7 @@ func (b *Handler[View, Store]) DeleteItems(t Txn, items []ItemID) error {
 	return nil
 }
 
-func (b *Handler[View, Store]) DeleteByMatchingIndex(t Txn, indexName string, indexKey []byte) error {
+func (b *Handler[View, Store]) DeleteByMatchingIndex(t interface{}, indexName string, indexKey []byte) error {
 	var IDs []ItemID
 	if err := b.IterateByMatchIndex(t, indexName, indexKey, func(view *View) error {
 		IDs = append(IDs, b.viewMeta.ID(view))
@@ -363,7 +363,7 @@ func (b *Handler[View, Store]) DeleteByMatchingIndex(t Txn, indexName string, in
 	return b.DeleteItems(t, IDs)
 }
 
-func (b *Handler[View, Store]) DeleteItem(t Txn, id ItemID) error {
+func (b *Handler[View, Store]) DeleteItem(t interface{}, id ItemID) error {
 	txn := t.(*txnImpl)
 
 	if len(b.indexes) > 0 {

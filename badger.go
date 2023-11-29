@@ -8,8 +8,6 @@ type BadgerDB struct {
 	DB *badger.DB
 }
 
-type Txn interface{}
-
 type txnImpl struct {
 	raw  *badger.Txn
 	refs []interface{}
@@ -19,13 +17,13 @@ func (tx *txnImpl) appendRefs(ref interface{}) {
 	tx.refs = append(tx.refs, ref)
 }
 
-func (b *BadgerDB) View(f func(tx Txn) error) error {
+func (b *BadgerDB) View(f func(tx interface{}) error) error {
 	return b.DB.View(func(tn *badger.Txn) error {
 		return f(&txnImpl{raw: tn})
 	})
 }
 
-func (b *BadgerDB) Update(f func(tx Txn) error) error {
+func (b *BadgerDB) Update(f func(tx interface{}) error) error {
 
 	err := b.DB.Update(func(tn *badger.Txn) error {
 		return f(&txnImpl{raw: tn})
