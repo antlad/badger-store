@@ -323,7 +323,7 @@ func (b *Handler[View, Store]) IterateByMatchIndex(t Txn, indexName string, inde
 	return nil
 }
 
-func (b *Handler[View, Store]) GetByID(t Txn, id ItemID, cb func(view *View)) error {
+func (b *Handler[View, Store]) GetByID(t Txn, id ItemID, cb func(view *View) error) error {
 	txn := t.(*txnImpl)
 	item, err := txn.raw.Get(b.itemKey(id))
 	if err != nil {
@@ -334,8 +334,7 @@ func (b *Handler[View, Store]) GetByID(t Txn, id ItemID, cb func(view *View)) er
 		if err != nil {
 			return err
 		}
-		cb(v)
-		return nil
+		return cb(v)
 	})
 }
 

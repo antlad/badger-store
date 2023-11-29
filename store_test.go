@@ -153,9 +153,10 @@ func TestBase(t *testing.T) {
 
 	found := false
 	err = d.View(func(tx Txn) error {
-		return h.GetByID(tx, h1.Id[:], func(view *ds.Human) {
+		return h.GetByID(tx, h1.Id[:], func(view *ds.Human) error {
 			found = true
 			checkViewMatch(t, h1, view)
+			return nil
 		})
 	})
 	require.NoError(t, err)
@@ -195,9 +196,10 @@ func TestMatch(t *testing.T) {
 
 	err = d.View(func(tx Txn) error {
 		found := false
-		err = h.GetByID(tx, h1.Id[:], func(view *ds.Human) {
+		err = h.GetByID(tx, h1.Id[:], func(view *ds.Human) error {
 			checkViewMatch(t, h1, view)
 			found = true
+			return nil
 		})
 		require.NoError(t, err)
 		require.True(t, found)
@@ -232,9 +234,10 @@ func TestMatch(t *testing.T) {
 
 	err = d.View(func(tx Txn) error {
 		found := false
-		err = h.GetByID(tx, h1.Id[:], func(view *ds.Human) {
+		err = h.GetByID(tx, h1.Id[:], func(view *ds.Human) error {
 			checkViewMatch(t, h1, view)
 			found = true
+			return nil
 		})
 		require.NoError(t, err)
 		require.True(t, found)
@@ -293,7 +296,8 @@ func TestIndexUpdate(t *testing.T) {
 		err = h.GetByUniqueIndex(tx, nameIDx, []byte("missing"), func(view *ds.Human) {
 		})
 		require.ErrorIs(t, err, badger.ErrKeyNotFound)
-		err = h.GetByID(tx, []byte{1, 2, 3}, func(view *ds.Human) {
+		err = h.GetByID(tx, []byte{1, 2, 3}, func(view *ds.Human) error {
+			return nil
 		})
 		require.ErrorIs(t, err, badger.ErrKeyNotFound)
 		count := 0
