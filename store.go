@@ -129,8 +129,7 @@ func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) err
 		if len(iv) == 0 {
 			continue
 		}
-		uID := b.uniqueIndexKey(k, iv)
-		existing, err := tx.Get(uID)
+		existing, err := tx.Get(b.uniqueIndexKey(k, iv))
 		if err != nil {
 			if errors.Is(err, badger.ErrKeyNotFound) {
 				continue
@@ -225,11 +224,9 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 		var err error
 		switch v {
 		case Unique:
-			uID := b.uniqueIndexKey(k, idxValue)
-			err = tx.Delete(uID)
+			err = tx.Delete(b.uniqueIndexKey(k, idxValue))
 		case Match:
-			mID := b.matchIndexKey(k, idxValue, id)
-			err = tx.Delete(mID)
+			err = tx.Delete(b.matchIndexKey(k, idxValue, id))
 		}
 		if err != nil {
 			return err
@@ -371,8 +368,9 @@ func (b *Handler[View, Store]) DeleteByMatchingIndex(t interface{}, indexName st
 func (b *Handler[View, Store]) DeleteItem(t interface{}, id ItemID) error {
 	txn := t.(*txnImpl)
 
+	itemKey := b.itemKey(id)
 	if len(b.indexes) > 0 {
-		item, err := txn.raw.Get(b.itemKey(id))
+		item, err := txn.raw.Get(itemKey)
 		if err != nil {
 			return err
 		}
@@ -388,7 +386,7 @@ func (b *Handler[View, Store]) DeleteItem(t interface{}, id ItemID) error {
 		}
 	}
 
-	if err := txn.raw.Delete(id); err != nil {
+	if err := txn.raw.Delete(itemKey); err != nil {
 		return err
 	}
 
