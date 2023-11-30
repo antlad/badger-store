@@ -139,7 +139,7 @@ func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) err
 		}
 		putID := b.storeMeta.ID(item)
 		err = existing.Value(func(existingID []byte) error {
-			if bytes.Equal(existingID, putID) {
+			if !bytes.Equal(existingID, putID) {
 				return ErrUniqueConstraintViolation
 			}
 			return nil
@@ -376,13 +376,16 @@ func (b *Handler[View, Store]) DeleteItem(t interface{}, id ItemID) error {
 		if err != nil {
 			return err
 		}
-		return item.Value(func(val []byte) error {
+		err = item.Value(func(val []byte) error {
 			v, err := b.meta.TakeView(val)
 			if err != nil {
 				return err
 			}
 			return b.onDelete(txn.raw, v)
 		})
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := txn.raw.Delete(id); err != nil {
