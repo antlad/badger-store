@@ -64,6 +64,7 @@ func (b *Handler[View, Store]) PutItem(t interface{}, item *Store) error {
 	if err := b.checkConstraints(txn.raw, item); err != nil {
 		return err
 	}
+
 	if err := b.beforePut(txn.raw, item); err != nil {
 		return err
 	}
@@ -116,6 +117,10 @@ func (b *Handler[View, Store]) matchIndexKey(name string, indexValue []byte, id 
 }
 
 func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) error {
+	if b.meta.StoreMeta().ID(item) == nil {
+		return ErrEmptyID
+	}
+
 	for k, v := range b.indexes {
 		if v != Unique {
 			continue
