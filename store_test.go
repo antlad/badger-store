@@ -271,10 +271,34 @@ func TestUniqueConstrain(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	//wait for error
 	err = d.Update(func(tx interface{}) error {
 		return h.PutItem(tx, &h2)
 	})
-	require.Error(t, err)
+
+	require.Error(t, err, ErrUniqueConstraintViolation)
+	// cleanup
+	err = d.Update(func(tx interface{}) error {
+		return h.DeleteItem(tx, h1.Id[:])
+	})
+	require.NoError(t, err)
+
+	foundTrash := false
+	err = h.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		for it.Rewind(); it.Valid(); it.Next() {
+			foundTrash = true
+		}
+		it.Close()
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, foundTrash)
+
+	err = d.Update(func(tx interface{}) error {
+		return h.PutItem(tx, &h2)
+	})
+	require.NoError(t, err)
 }
 
 func TestIndexUpdate(t *testing.T) {
