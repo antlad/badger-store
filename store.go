@@ -3,6 +3,7 @@ package badger_store
 import (
 	"bytes"
 	"errors"
+	"fmt"
 
 	"github.com/dgraph-io/badger/v4"
 )
@@ -139,7 +140,7 @@ func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) err
 		putID := b.storeMeta.ID(item)
 		err = existing.Value(func(existingID []byte) error {
 			if !bytes.Equal(existingID, putID) {
-				return ErrUniqueConstraintViolation
+				return fmt.Errorf("index name %s: %w", k, ErrUniqueConstraintViolation)
 			}
 			return nil
 		})
