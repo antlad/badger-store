@@ -180,7 +180,7 @@ func (b *Handler[View, Store]) beforePut(tx *badger.Txn, item *Store) error {
 			case Match:
 				err = tx.Delete(b.matchIndexKey(k, idxValue, itemID))
 			}
-			if err != nil {
+			if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 				return err
 			}
 		}
@@ -347,7 +347,7 @@ func (b *Handler[View, Store]) DeleteTable() error {
 
 func (b *Handler[View, Store]) DeleteItems(t interface{}, items []ItemID) error {
 	for _, e := range items {
-		if err := b.DeleteItem(t, e); err != nil {
+		if err := b.DeleteItem(t, e); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 			return nil
 		}
 	}
@@ -359,7 +359,7 @@ func (b *Handler[View, Store]) DeleteByMatchingIndex(t interface{}, indexName st
 	if err := b.IterateByMatchIndex(t, indexName, indexKey, func(view *View) error {
 		IDs = append(IDs, b.viewMeta.ID(view))
 		return nil
-	}); err != nil {
+	}); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 		return err
 	}
 
