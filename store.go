@@ -373,6 +373,9 @@ func (b *Handler[View, Store]) DeleteItem(t interface{}, id ItemID) error {
 	if len(b.indexes) > 0 {
 		item, err := txn.raw.Get(itemKey)
 		if err != nil {
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				return nil
+			}
 			return err
 		}
 		err = item.Value(func(val []byte) error {
