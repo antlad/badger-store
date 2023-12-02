@@ -229,7 +229,7 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 		case Match:
 			err = tx.Delete(b.matchIndexKey(k, idxValue, id))
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
 	}
@@ -387,7 +387,7 @@ func (b *Handler[View, Store]) DeleteItem(t interface{}, id ItemID) error {
 		}
 	}
 
-	if err := txn.raw.Delete(itemKey); err != nil {
+	if err := txn.raw.Delete(itemKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 		return err
 	}
 
