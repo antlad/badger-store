@@ -13,18 +13,21 @@ type txnImpl struct {
 	refs []interface{}
 }
 
-func (tx *txnImpl) appendRefs(ref interface{}) {
+func (tx *txnImpl) AppendRef(ref interface{}) {
 	tx.refs = append(tx.refs, ref)
 }
 
-func (b *BadgerDB) View(f func(tx interface{}) error) error {
+func (tx *txnImpl) Raw() *badger.Txn {
+	return tx.raw
+}
+
+func (b *BadgerDB) View(f func(tx Transaction) error) error {
 	return b.DB.View(func(tn *badger.Txn) error {
 		return f(&txnImpl{raw: tn})
 	})
 }
 
-func (b *BadgerDB) Update(f func(tx interface{}) error) error {
-
+func (b *BadgerDB) Update(f func(tx Transaction) error) error {
 	err := b.DB.Update(func(tn *badger.Txn) error {
 		return f(&txnImpl{raw: tn})
 	})

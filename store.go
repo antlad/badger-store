@@ -24,6 +24,11 @@ type Index struct {
 
 type IndexesDesc map[string]IndexType
 
+type Transaction interface {
+	AppendRef(interface{})
+	Raw() *badger.Txn
+}
+
 type ItemMeta[T any] interface {
 	ID(*T) ItemID
 	IndexValue(t *T, indexName string) []byte
@@ -60,13 +65,13 @@ func NewHandler[View any, Store any](db *badger.DB, meta Meta[View, Store]) *Han
 	}
 }
 
-func (b *Handler[View, Store]) PutItem(t interface{}, item *Store) error {
-	txn := t.(*txnImpl)
-	if err := b.checkConstraints(txn.raw, item); err != nil {
+func (b *Handler[View, Store]) PutItem(t Transaction, item *Store) error {
+
+	if err := b.checkConstraints(t.Raw(), item); err != nil {
 		return err
 	}
 
-	if err := b.beforePut(txn.raw, item); err != nil {
+	if err := b.beforePut(t.Raw(), item); err != nil {
 		return err
 	}
 
@@ -75,12 +80,12 @@ func (b *Handler[View, Store]) PutItem(t interface{}, item *Store) error {
 		return err
 	}
 
-	if err = txn.raw.Set(b.itemKey(b.storeMeta.ID(item)), data); err != nil {
+	if err = t.Raw().Set(b.itemKey(b.storeMeta.ID(item)), data); err != nil {
 		return err
 	}
 
-	txn.refs = append(txn.refs, data)
-	return b.afterPut(txn.raw, item)
+	t.AppendRef(data)
+	return b.afterPut(t.Raw(), item)
 }
 
 func (b *Handler[View, Store]) itemKey(id ItemID) []byte {
@@ -236,18 +241,17 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 	return nil
 }
 
-func (b *Handler[View, Store]) GetByUniqueIndex(t interface{}, indexName string, indexValue []byte, cb func(view *View)) error {
+func (b *Handler[View, Store]) GetByUniqueIndex(t Transaction, indexName string, indexValue []byte, cb func(view *View)) error {
 	if len(indexValue) == 0 {
 		return ErrEmptyIndexValue
 	}
 
-	txn := t.(*txnImpl)
-	indexItem, err := txn.raw.Get(b.uniqueIndexKey(indexName, indexValue))
+	indexItem, err := t.Raw().Get(b.uniqueIndexKey(indexName, indexValue))
 	if err != nil {
 		return err
 	}
 	err = indexItem.Value(func(val []byte) error {
-		item, err := txn.raw.Get(b.itemKey(val))
+		item, err := t.Raw().Get(b.itemKey(val))
 		if err != nil {
 			return err
 		}
@@ -269,10 +273,8 @@ func iteratorOpts(prefix []byte) badger.IteratorOptions {
 	return opts
 }
 
-func (b *Handler[View, Store]) Iterate(t interface{}, cb func(view *View) error) error {
-	txn := t.(*txnImpl)
-
-	it := txn.raw.NewIterator(iteratorOpts(b.valuesPrefix()))
+func (b *Handler[View, Store]) Iterate(t Transaction, cb func(view *View) error) error {
+	it := t.Raw().NewIterator(iteratorOpts(b.valuesPrefix()))
 	defer it.Close()
 
 	for it.Rewind(); it.Valid(); it.Next() {
@@ -294,16 +296,14 @@ func (b *Handler[View, Store]) Iterate(t interface{}, cb func(view *View) error)
 	return nil
 }
 
-func (b *Handler[View, Store]) IterateByMatchIndex(t interface{}, indexName string, indexKey []byte, cb func(view *View) error) error {
-	txn := t.(*txnImpl)
-
+func (b *Handler[View, Store]) IterateByMatchIndex(t Transaction, indexName string, indexKey []byte, cb func(view *View) error) error {
 	matchPrefix := b.matchIndexPrefix(indexName, indexKey)
-	it := txn.raw.NewIterator(iteratorOpts(matchPrefix))
+	it := t.Raw().NewIterator(iteratorOpts(matchPrefix))
 	defer it.Close()
 
 	for it.Rewind(); it.Valid(); it.Next() {
 		err := it.Item().Value(func(val []byte) error {
-			item, err := txn.raw.Get(b.itemKey(val))
+			item, err := t.Raw().Get(b.itemKey(val))
 			if err != nil {
 				return err
 			}
@@ -326,9 +326,8 @@ func (b *Handler[View, Store]) IterateByMatchIndex(t interface{}, indexName stri
 	return nil
 }
 
-func (b *Handler[View, Store]) GetByID(t interface{}, id ItemID, cb func(view *View) error) error {
-	txn := t.(*txnImpl)
-	item, err := txn.raw.Get(b.itemKey(id))
+func (b *Handler[View, Store]) GetByID(t Transaction, id ItemID, cb func(view *View) error) error {
+	item, err := t.Raw().Get(b.itemKey(id))
 	if err != nil {
 		return err
 	}
@@ -345,7 +344,7 @@ func (b *Handler[View, Store]) DeleteTable() error {
 	return b.db.DropPrefix(b.tableName())
 }
 
-func (b *Handler[View, Store]) DeleteItems(t interface{}, items []ItemID) error {
+func (b *Handler[View, Store]) DeleteItems(t Transaction, items []ItemID) error {
 	for _, e := range items {
 		if err := b.DeleteItem(t, e); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 			return nil
@@ -354,7 +353,7 @@ func (b *Handler[View, Store]) DeleteItems(t interface{}, items []ItemID) error 
 	return nil
 }
 
-func (b *Handler[View, Store]) DeleteByMatchingIndex(t interface{}, indexName string, indexKey []byte) error {
+func (b *Handler[View, Store]) DeleteByMatchingIndex(t Transaction, indexName string, indexKey []byte) error {
 	var IDs []ItemID
 	if err := b.IterateByMatchIndex(t, indexName, indexKey, func(view *View) error {
 		IDs = append(IDs, b.viewMeta.ID(view))
@@ -366,12 +365,10 @@ func (b *Handler[View, Store]) DeleteByMatchingIndex(t interface{}, indexName st
 	return b.DeleteItems(t, IDs)
 }
 
-func (b *Handler[View, Store]) DeleteItem(t interface{}, id ItemID) error {
-	txn := t.(*txnImpl)
-
+func (b *Handler[View, Store]) DeleteItem(t Transaction, id ItemID) error {
 	itemKey := b.itemKey(id)
 	if len(b.indexes) > 0 {
-		item, err := txn.raw.Get(itemKey)
+		item, err := t.Raw().Get(itemKey)
 		if err != nil {
 			if errors.Is(err, badger.ErrKeyNotFound) {
 				return nil
@@ -383,14 +380,14 @@ func (b *Handler[View, Store]) DeleteItem(t interface{}, id ItemID) error {
 			if err != nil {
 				return err
 			}
-			return b.onDelete(txn.raw, v)
+			return b.onDelete(t.Raw(), v)
 		})
 		if err != nil {
 			return err
 		}
 	}
 
-	if err := txn.raw.Delete(itemKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+	if err := t.Raw().Delete(itemKey); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 		return err
 	}
 
