@@ -4,8 +4,12 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
-type BadgerDB struct {
+type BadgerStore struct {
 	DB *badger.DB
+}
+
+func NewBadgerStore(DB *badger.DB) *BadgerStore {
+	return &BadgerStore{DB: DB}
 }
 
 type txnImpl struct {
@@ -21,24 +25,24 @@ func (tx *txnImpl) Raw() *badger.Txn {
 	return tx.raw
 }
 
-func (b *BadgerDB) View(f func(tx Transaction) error) error {
+func (b *BadgerStore) View(f func(tx Transaction) error) error {
 	return b.DB.View(func(tn *badger.Txn) error {
 		return f(&txnImpl{raw: tn})
 	})
 }
 
-func (b *BadgerDB) Update(f func(tx Transaction) error) error {
+func (b *BadgerStore) Update(f func(tx Transaction) error) error {
 	err := b.DB.Update(func(tn *badger.Txn) error {
 		return f(&txnImpl{raw: tn})
 	})
 	return err
 }
 
-func (b *BadgerDB) Reset() error {
+func (b *BadgerStore) Reset() error {
 	return b.DB.DropAll()
 }
 
-func (b *BadgerDB) Close() error {
+func (b *BadgerStore) Close() error {
 	if b.DB != nil {
 		return b.DB.Close()
 	}
