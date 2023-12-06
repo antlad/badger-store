@@ -55,6 +55,10 @@ func IsStopIteration(err error) bool {
 	return errors.Is(err, ErrStopIteration)
 }
 
+func IsNotFound(err error) bool {
+	return errors.Is(err, badger.ErrKeyNotFound)
+}
+
 func NewHandler[View any, Store any](db *badger.DB, meta Meta[View, Store]) *Handler[View, Store] {
 	return &Handler[View, Store]{
 		db:        db,
@@ -305,6 +309,9 @@ func (b *Handler[View, Store]) IterateByMatchIndex(t Transaction, indexName stri
 		err := it.Item().Value(func(val []byte) error {
 			item, err := t.Raw().Get(b.itemKey(val))
 			if err != nil {
+				if IsNotFound(err) {
+					return nil
+				}
 				return err
 			}
 			return item.Value(func(data []byte) error {
