@@ -2,6 +2,7 @@ package badger_store
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -17,12 +18,26 @@ const (
 	Match
 )
 
-type Index struct {
-	IdxType IndexType
-	IdxName string
+var (
+	metaByte   = byte('t')
+	indexByte  = byte('i')
+	uniqueByte = byte('u')
+	matchByte  = byte('m')
+	valueByte  = byte('v')
+)
+
+type TableMeta struct {
+	Name    string      `json:"name"`
+	Version int         `json:"version"`
+	Indexes IndexesDesc `json:"indexes"`
 }
 
-type IndexesDesc map[string]IndexType
+type IndexDesc struct {
+	IdxType IndexType `json:"type"`
+	Version int       `json:"version"`
+}
+
+type IndexesDesc map[string]IndexDesc
 
 type Transaction interface {
 	AppendRef(interface{})
@@ -36,6 +51,7 @@ type ItemMeta[T any] interface {
 
 type Meta[View any, Store any] interface {
 	TableName() string
+	Version() int
 	TakeView([]byte) (*View, error)
 	Serialize(*Store) ([]byte, error)
 	Indexes() IndexesDesc
@@ -69,6 +85,90 @@ func NewHandler[View any, Store any](db *badger.DB, meta Meta[View, Store]) *Han
 	}
 }
 
+func (b *Handler[View, Store]) LoadTableMeta() (meta TableMeta, err error) {
+	err = b.db.View(func(tx *badger.Txn) error {
+		item, err2 := tx.Get(b.tableMetaKey())
+		if err2 != nil {
+			return err2
+		}
+		return item.Value(func(val []byte) error {
+			return json.Unmarshal(val, &meta)
+		})
+	})
+	return
+}
+
+func (b *Handler[View, Store]) DropTableMeta() error {
+	return b.db.DropPrefix(append(b.tableName(), metaByte))
+}
+
+func (b *Handler[View, Store]) SaveTableMeta() error {
+	meta := TableMeta{
+		Name:    b.meta.TableName(),
+		Version: b.meta.Version(),
+		Indexes: b.meta.Indexes(),
+	}
+	return b.db.Update(func(tx *badger.Txn) error {
+		data, err := json.Marshal(meta)
+		if err != nil {
+			return err
+		}
+		return tx.Set(b.tableMetaKey(), data)
+	})
+}
+
+func (b *Handler[View, Store]) Init(tx Transaction) error {
+	oldMeta, err := b.LoadTableMeta()
+	if err != nil {
+		if IsNotFound(err) {
+			return b.SaveTableMeta()
+		}
+		return err
+	}
+
+	newIndexes := b.meta.Indexes()
+	for k := range oldMeta.Indexes {
+		_, ok := newIndexes[k]
+		if !ok {
+			if err = b.db.DropPrefix(b.indexPrefix(k)); err != nil {
+				return err
+			}
+		}
+	}
+
+	for k, v := range b.meta.Indexes() {
+		m, ok := oldMeta.Indexes[k]
+		if ok {
+			if m.IdxType == v.IdxType && m.Version == v.Version {
+				continue
+			}
+			// type or version is different - need to recreate index
+			if err = b.db.DropPrefix(b.indexPrefix(k)); err != nil {
+				return err
+			}
+		}
+
+		err = b.Iterate(tx, func(view *View) error {
+			indexVal := b.meta.ViewMeta().IndexValue(view, k)
+			id := b.viewMeta.ID(view)
+			switch v.IdxType {
+			case Unique:
+				uID := b.uniqueIndexKey(k, indexVal)
+				err = tx.Raw().Set(uID, id)
+			case Match:
+				mID := b.matchIndexKey(k, indexVal, id)
+				err = tx.Raw().Set(mID, id)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return b.SaveTableMeta()
+}
+
 func (b *Handler[View, Store]) PutItem(t Transaction, item *Store) error {
 
 	if err := b.checkConstraints(t.Raw(), item); err != nil {
@@ -92,8 +192,14 @@ func (b *Handler[View, Store]) PutItem(t Transaction, item *Store) error {
 	return b.afterPut(t.Raw(), item)
 }
 
+func (b *Handler[View, Store]) tableMetaKey() []byte {
+	r := append(b.tableName(), metaByte)
+	r = append(r, []byte{'m', 'e', 't', 'a'}...)
+	return r
+}
+
 func (b *Handler[View, Store]) itemKey(id ItemID) []byte {
-	r := append(b.tableName(), []byte{'v'}...)
+	r := append(b.tableName(), valueByte)
 	return append(r, id...)
 }
 
@@ -102,26 +208,26 @@ func (b *Handler[View, Store]) tableName() []byte {
 }
 
 func (b *Handler[View, Store]) valuesPrefix() []byte {
-	return append(b.tableName(), []byte{'v'}...)
+	return append(b.tableName(), valueByte)
 }
 
 func (b *Handler[View, Store]) indexPrefix(name string) []byte {
-	r := append(b.tableName(), []byte{'i'}...)
+	r := append(b.tableName(), indexByte)
 	return append(r, []byte(name)...)
 }
 
 func (b *Handler[View, Store]) uniqueIndexKey(name string, indexValue []byte) []byte {
-	r := append(b.indexPrefix(name), 'u')
+	r := append(b.indexPrefix(name), uniqueByte)
 	return append(r, indexValue...)
 }
 
 func (b *Handler[View, Store]) matchIndexPrefix(name string, indexValue []byte) []byte {
-	r := append(b.indexPrefix(name), 'm')
+	r := append(b.indexPrefix(name), matchByte)
 	return append(r, indexValue...)
 }
 
 func (b *Handler[View, Store]) matchIndexKey(name string, indexValue []byte, id ItemID) []byte {
-	r := append(b.indexPrefix(name), 'm')
+	r := append(b.indexPrefix(name), matchByte)
 	p := append(r, indexValue...)
 	return append(p, id...)
 }
@@ -132,7 +238,7 @@ func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) err
 	}
 
 	for k, v := range b.indexes {
-		if v != Unique {
+		if v.IdxType != Unique {
 			continue
 		}
 		iv := b.storeMeta.IndexValue(item, k)
@@ -183,7 +289,7 @@ func (b *Handler[View, Store]) beforePut(tx *badger.Txn, item *Store) error {
 				continue
 			}
 
-			switch v {
+			switch v.IdxType {
 			case Unique:
 				err = tx.Delete(b.uniqueIndexKey(k, idxValue))
 			case Match:
@@ -201,7 +307,6 @@ func (b *Handler[View, Store]) beforePut(tx *badger.Txn, item *Store) error {
 
 func (b *Handler[View, Store]) afterPut(tx *badger.Txn, item *Store) error {
 	for k, v := range b.indexes {
-
 		idxValue := b.storeMeta.IndexValue(item, k)
 		if len(idxValue) == 0 {
 			continue
@@ -209,7 +314,7 @@ func (b *Handler[View, Store]) afterPut(tx *badger.Txn, item *Store) error {
 
 		id := b.storeMeta.ID(item)
 		var err error
-		switch v {
+		switch v.IdxType {
 		case Unique:
 			uID := b.uniqueIndexKey(k, idxValue)
 			err = tx.Set(uID, id)
@@ -232,7 +337,7 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 			continue
 		}
 		var err error
-		switch v {
+		switch v.IdxType {
 		case Unique:
 			err = tx.Delete(b.uniqueIndexKey(k, idxValue))
 		case Match:

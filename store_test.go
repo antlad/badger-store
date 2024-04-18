@@ -42,6 +42,11 @@ func prepareDB(t *testing.T) (*BadgerStore, *Handler[ds.Human, test.Human]) {
 	err = d.Reset()
 	require.NoError(t, err)
 	h := NewHandler[ds.Human, test.Human](d.DB, &HumanTable{builder: flatbuffers.NewBuilder(0xFFF)})
+	err = d.Update(func(tx Transaction) error {
+		return h.Init(tx)
+	})
+	require.NoError(t, err)
+
 	return d, h
 }
 
@@ -87,6 +92,10 @@ type HumanTable struct {
 	builder *flatbuffers.Builder
 }
 
+func (m *HumanTable) Version() int {
+	return 0
+}
+
 func (m *HumanTable) TableName() string {
 	return "human"
 }
@@ -103,10 +112,12 @@ func (m *HumanTable) Serialize(h *test.Human) ([]byte, error) {
 }
 
 func (m *HumanTable) Indexes() IndexesDesc {
-	return map[string]IndexType{
-		emailIDx:  Unique,
-		statusIDx: Match,
-		nameIDx:   Unique,
+	return map[string]IndexDesc{
+		emailIDx: {
+			IdxType: Unique,
+		},
+		statusIDx: {IdxType: Match},
+		nameIDx:   {IdxType: Unique},
 	}
 }
 
@@ -282,11 +293,14 @@ func TestUniqueConstrain(t *testing.T) {
 		return h.DeleteItem(tx, h1.Id[:])
 	})
 	require.NoError(t, err)
+	err = h.DropTableMeta()
+	require.NoError(t, err)
 
 	foundTrash := false
 	err = h.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		for it.Rewind(); it.Valid(); it.Next() {
+
 			foundTrash = true
 		}
 		it.Close()
