@@ -36,17 +36,21 @@ func NewBadgerDB(folder string) (*BadgerStore, error) {
 	return d, nil
 }
 
-func prepareDB(t *testing.T) (*BadgerStore, *Handler[ds.Human, test.Human]) {
+func prepareDB(version int, reset bool, t *testing.T) (*BadgerStore, *Handler[ds.Human, test.Human]) {
 	d, err := NewBadgerDB("/tmp/store_test")
 	require.NoError(t, err)
-	err = d.Reset()
-	require.NoError(t, err)
-	h := NewHandler[ds.Human, test.Human](d.DB, &HumanTable{builder: flatbuffers.NewBuilder(0xFFF)})
+	if reset {
+		err = d.Reset()
+		require.NoError(t, err)
+	}
+	h := NewHandler[ds.Human, test.Human](d.DB, &HumanTable{
+		builder: flatbuffers.NewBuilder(0xFFF),
+		version: version,
+	})
 	err = d.Update(func(tx Transaction) error {
 		return h.Init(tx)
 	})
 	require.NoError(t, err)
-
 	return d, h
 }
 
@@ -89,11 +93,12 @@ func (m *HumanViewMeta) IndexValue(h *ds.Human, indexName string) []byte {
 }
 
 type HumanTable struct {
+	version int
 	builder *flatbuffers.Builder
 }
 
 func (m *HumanTable) Version() int {
-	return 0
+	return m.version
 }
 
 func (m *HumanTable) TableName() string {
@@ -115,9 +120,16 @@ func (m *HumanTable) Indexes() IndexesDesc {
 	return map[string]IndexDesc{
 		emailIDx: {
 			IdxType: Unique,
+			Version: m.version,
 		},
-		statusIDx: {IdxType: Match},
-		nameIDx:   {IdxType: Unique},
+		statusIDx: {
+			IdxType: Match,
+			Version: m.version,
+		},
+		nameIDx: {
+			IdxType: Unique,
+			Version: m.version,
+		},
 	}
 }
 
@@ -152,8 +164,35 @@ func checkViewMatch(t *testing.T, h test.Human, view *ds.Human) {
 	require.Equal(t, h.Age, int(view.Age()))
 }
 
+func TestIndexMigrate(t *testing.T) {
+	d, h := prepareDB(0, true, t)
+	h1 := createHuman(1)
+	err := d.Update(func(tx Transaction) error {
+
+		err := h.PutItem(tx, &h1)
+		require.NoError(t, err)
+		return nil
+	})
+	require.NoError(t, err)
+	d.Close()
+
+	d, h = prepareDB(1, false, t)
+	defer d.Close()
+	err = d.View(func(tx Transaction) error {
+		return h.GetByID(tx, h1.Id[:], func(view *ds.Human) error {
+			checkViewMatch(t, h1, view)
+			return nil
+		})
+	})
+	require.NoError(t, err)
+
+	//err = d.Update(func(tx Transaction) error {
+	//	h1 := createHuman(0)
+	//	h1.Email = "
+}
+
 func TestBase(t *testing.T) {
-	d, h := prepareDB(t)
+	d, h := prepareDB(0, true, t)
 	defer d.Close()
 
 	h1 := createHuman(1)
@@ -176,7 +215,7 @@ func TestBase(t *testing.T) {
 }
 
 func TestMatch(t *testing.T) {
-	d, h := prepareDB(t)
+	d, h := prepareDB(0, true, t)
 	defer d.Close()
 
 	items := make([]test.Human, 0, 100)
@@ -272,7 +311,7 @@ func TestMatch(t *testing.T) {
 }
 
 func TestUniqueConstrain(t *testing.T) {
-	d, h := prepareDB(t)
+	d, h := prepareDB(0, true, t)
 	defer d.Close()
 	h1 := createHuman(0)
 	h2 := createHuman(1)
@@ -316,7 +355,7 @@ func TestUniqueConstrain(t *testing.T) {
 }
 
 func TestIndexUpdate(t *testing.T) {
-	d, h := prepareDB(t)
+	d, h := prepareDB(0, true, t)
 	defer d.Close()
 
 	items := make([]test.Human, 0, 10)
