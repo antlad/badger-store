@@ -6,3 +6,8 @@ coverage:
 .PHONY: test
 test:
 	go test -parallel=10 $(PWD)/... -coverprofile=cover.out
+
+.PHONY: lint
+lint:
+	golangci-lint --timeout=5m run  ./...
+
