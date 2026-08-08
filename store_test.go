@@ -242,7 +242,7 @@ func TestMatch(t *testing.T) {
 	items := make([]test.Human, 0, 100)
 
 	err := d.Update(func(tx Transaction) error {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			hm := createHuman(i)
 			items = append(items, hm)
 			err := h.PutItem(tx, &hm)
@@ -289,7 +289,7 @@ func TestMatch(t *testing.T) {
 
 	deleteCount := 40
 	IDs := make([]ItemID, 0, deleteCount)
-	for i := 0; i < deleteCount; i++ {
+	for i := range deleteCount {
 		v := items[i]
 		IDs = append(IDs, v.Id[:])
 		t.Log("delete id=", v.Id.String())
@@ -381,7 +381,7 @@ func TestIndexUpdate(t *testing.T) {
 
 	items := make([]test.Human, 0, 10)
 	err := d.Update(func(tx Transaction) error {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			hm := createHuman(i)
 			items = append(items, hm)
 			err := h.PutItem(tx, &hm)

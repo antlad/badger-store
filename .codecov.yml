@@ -1,0 +1,14 @@
+# Coverage is about the library, not the demo programs or generated accessors.
+ignore:
+  - "examples/**"
+  - "test/ds/**"
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+    patch: off
+
+comment: false

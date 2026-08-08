@@ -118,7 +118,6 @@ func run() error {
 	fmt.Println("== insert ==")
 	if err := store.Update(func(tx bstore.Transaction) error {
 		for _, h := range []test.Human{alice, bob, carol} {
-			h := h
 			if err := handler.PutItem(tx, &h); err != nil {
 				return err
 			}

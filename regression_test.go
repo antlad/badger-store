@@ -77,7 +77,7 @@ func TestDeleteByMatchingIndex_DeletesOnlyMatching(t *testing.T) {
 	d := openTempDB(t)
 	h := humanHandler(t, d, 0)
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		putRow(t, d, h, test.Human{Id: uuid.New(), Name: fmt.Sprintf("a%d", i), Email: fmt.Sprintf("a%d@x.com", i), Status: "active"})
 		putRow(t, d, h, test.Human{Id: uuid.New(), Name: fmt.Sprintf("i%d", i), Email: fmt.Sprintf("i%d@x.com", i), Status: "inactive"})
 	}

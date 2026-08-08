@@ -58,7 +58,7 @@ type Transaction interface {
 	// AppendRef keeps a reference alive for the lifetime of the transaction.
 	//
 	// Deprecated: Badger already retains the slices it is given until commit.
-	AppendRef(interface{})
+	AppendRef(any)
 	// Raw exposes the underlying Badger transaction.
 	Raw() *badger.Txn
 }
@@ -248,7 +248,7 @@ func (b *Handler[View, Store]) dropRemovedIndexes(old, current IndexesDesc) erro
 // planRebuild lists the indexes to rebuild: those whose definition changed, and
 // those an earlier Init dropped without finishing.
 func planRebuild(old, current IndexesDesc, pending map[string]struct{}, metaFound bool) []string {
-	var rebuild []string
+	rebuild := make([]string, 0, len(current))
 	for k, v := range current {
 		if _, stale := pending[k]; stale {
 			rebuild = append(rebuild, k)

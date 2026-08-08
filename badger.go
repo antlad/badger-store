@@ -16,10 +16,10 @@ func NewBadgerStore(db *badger.DB) *BadgerStore {
 
 type txnImpl struct {
 	raw  *badger.Txn
-	refs []interface{}
+	refs []any
 }
 
-func (tx *txnImpl) AppendRef(ref interface{}) {
+func (tx *txnImpl) AppendRef(ref any) {
 	tx.refs = append(tx.refs, ref)
 }
 

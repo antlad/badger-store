@@ -1,5 +1,9 @@
 # badger-store
 
+[![CI](https://github.com/antlad/badger-store/actions/workflows/ci.yml/badge.svg)](https://github.com/antlad/badger-store/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/antlad/badger-store/branch/master/graph/badge.svg)](https://codecov.io/gh/antlad/badger-store)
+[![Go Reference](https://pkg.go.dev/badge/github.com/antlad/badger-store.svg)](https://pkg.go.dev/github.com/antlad/badger-store)
+
 A tiny, generic **document-store layer on top of [BadgerDB](https://github.com/dgraph-io/badger)** for Go.
 
 Badger is a fast embedded KV store, but it only knows keys and byte blobs. Anything above that — "give me the user with this e-mail", "give me every active session", "don't allow two rows with the same slug" — you build yourself, and you usually pay a full decode on every read. badger-store removes both costs:
