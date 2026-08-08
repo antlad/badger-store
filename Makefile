@@ -9,5 +9,9 @@ test:
 
 .PHONY: lint
 lint:
-	golangci-lint --timeout=5m run  ./...
+	golangci-lint run ./...
+
+.PHONY: lint-fix
+lint-fix:
+	golangci-lint run --fix ./...
 

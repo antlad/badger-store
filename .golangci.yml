@@ -1,0 +1,148 @@
+version: "2"
+
+run:
+  concurrency: 4
+  timeout: 5m
+  tests: true
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
+
+# Kept: the high-signal correctness/safety linters (on top of the v2 defaults:
+# errcheck, govet, ineffassign, staticcheck, unused).
+# Intentionally NOT enabled: decorder, funlen, mnd, musttag, revive, thelper —
+# opinionated style rules that would require broad churn (or an API rename on the
+# fixture types) without catching real bugs.
+linters:
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - dupl
+    - dupword
+    - durationcheck
+    - err113
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - forcetypeassert
+    - gocheckcompilerdirectives
+    - goconst
+    - gocritic
+    - gocyclo
+    - goprintffuncname
+    - gosec
+    - grouper
+    - importas
+    - interfacebloat
+    - ireturn
+    - loggercheck
+    - makezero
+    - misspell
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nosprintfhostport
+    - prealloc
+    - predeclared
+    - promlinter
+    - reassign
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - usestdlibvars
+    - whitespace
+  settings:
+    dupl:
+      threshold: 150
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+      exclude-functions:
+        - encoding/json.Marshal
+        - encoding/json.MarshalIndent
+    errchkjson:
+      check-error-free-encoding: false
+      report-no-exported: false
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    exhaustive:
+      check:
+        - switch
+        - map
+      default-signifies-exhaustive: true
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    gocyclo:
+      min-complexity: 20
+    ireturn:
+      allow:
+        - error
+        - generic
+        - fx.Option
+        - .*(Res)$
+    misspell:
+      locale: US
+    nestif:
+      min-complexity: 10
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Tests get a looser bar than production code.
+      - path: _test\.go
+        linters:
+          - containedctx
+          - contextcheck
+          - dupl
+          - dupword
+          - err113
+          - errname
+          - exhaustive
+          - forcetypeassert
+          - goconst
+          - gocritic
+          - gocyclo
+          - gosec
+          - ireturn
+          - nilerr
+          - noctx
+          - promlinter
+          - reassign
+          - whitespace
+      # Hand-written FlatBuffers fixtures: the int->int32 conversion is fine here.
+      - path: ^test/
+        linters:
+          - gosec
+    paths:
+      - third_party$
+      - builtin$
+      - examples/ # runnable demo code — clarity over lint compliance
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
