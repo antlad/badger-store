@@ -1,6 +1,7 @@
 package badger_store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -147,9 +148,8 @@ func TestInit_MetaNotSavedIfTxnRollsBack(t *testing.T) {
 	require.Equal(t, 0, meta.Version, "meta persisted despite the transaction rolling back")
 }
 
-// openSmallBatchDB opens a DB whose memtable - and therefore whose per-transaction
-// entry ceiling - is small, so a migration can outgrow one transaction without
-// needing a hundred thousand rows.
+// openSmallBatchDB shrinks the memtable, and with it the per-transaction entry
+// ceiling, so a migration outgrows one transaction without a lot of rows.
 func openSmallBatchDB(t *testing.T, folder string) *BadgerStore {
 	t.Helper()
 	opts := badger.DefaultOptions(folder).WithLogger(nil)
@@ -161,8 +161,8 @@ func openSmallBatchDB(t *testing.T, folder string) *BadgerStore {
 	return &BadgerStore{DB: db}
 }
 
-// seedRows writes n rows, committing in chunks: a row costs four entries (the
-// record plus three index entries) and one transaction cannot hold them all.
+// seedRows writes n rows in chunks - a row costs four entries, one record plus
+// three index entries.
 func seedRows(t *testing.T, d *BadgerStore, h *Handler[ds.Human, test.Human], n int) {
 	t.Helper()
 	chunk := int(d.DB.MaxBatchCount() / 8)
@@ -180,8 +180,7 @@ func seedRows(t *testing.T, d *BadgerStore, h *Handler[ds.Human, test.Human], n 
 	}
 }
 
-// A migration that writes more index entries than one badger transaction can
-// hold must still succeed (it used to fail with ErrTxnTooBig).
+// A migration bigger than one badger transaction must still succeed.
 func TestInitMigrate_ExceedsOneTransaction(t *testing.T) {
 	dir := t.TempDir()
 	d := openSmallBatchDB(t, dir)
@@ -203,13 +202,12 @@ func TestInitMigrate_ExceedsOneTransaction(t *testing.T) {
 	// Every index must be complete afterwards.
 	require.Equal(t, rows/2, matchCount(t, d2, h2, "ok"), "match index incomplete after migration")
 	require.NoError(t, d2.View(func(tx Transaction) error {
-		return h2.GetByUniqueIndex(tx, emailIDx, []byte("user7@mail.com"), func(view *ds.Human) {})
+		return h2.GetByUniqueIndex(tx, emailIDx, []byte("user7@mail.com"), func(view *ds.Human) error { return nil })
 	}), "unique index incomplete after migration")
 }
 
-// A migration whose transaction never commits must be retried by the next Init -
-// even one running the *old* version - instead of silently leaving the index
-// dropped and empty.
+// A migration whose transaction never commits must be retried by the next Init,
+// even one running the old version.
 func TestInitMigrate_RetriedAfterRollback(t *testing.T) {
 	dir := t.TempDir()
 	d := openSmallBatchDB(t, dir)
@@ -249,7 +247,7 @@ func TestInitMigrate_RetriedAfterRollback(t *testing.T) {
 
 	require.Equal(t, 100, matchCount(t, d3, h3, "ok"), "match index was not rebuilt after the failed migration")
 	require.NoError(t, d3.View(func(tx Transaction) error {
-		return h3.GetByUniqueIndex(tx, emailIDx, []byte("user7@mail.com"), func(view *ds.Human) {})
+		return h3.GetByUniqueIndex(tx, emailIDx, []byte("user7@mail.com"), func(view *ds.Human) error { return nil })
 	}), "unique index was not rebuilt after the failed migration")
 
 	markers, err = h3.loadRebuildMarkers()
@@ -257,9 +255,8 @@ func TestInitMigrate_RetriedAfterRollback(t *testing.T) {
 	require.Empty(t, markers, "markers must be cleared once the rebuild commits")
 }
 
-// A match lookup must not return rows whose index value merely starts with the
-// requested one. The id is appended to the key, so "okX" would otherwise match
-// a row with status "ok" whose id happens to begin with 'X'.
+// A match lookup must not return rows whose value only starts with the one asked
+// for: the id is appended, so "okX" could otherwise match "ok" + an id from X.
 func TestIterateByMatchIndex_PrefixDoesNotLeak(t *testing.T) {
 	d := openTempDB(t)
 	h := humanHandler(t, d, 0)
@@ -291,6 +288,108 @@ func TestIterateByMatchIndex_PrefixDoesNotLeak(t *testing.T) {
 	require.Equal(t, []string{"a"}, got)
 }
 
+// GetByUniqueIndex must return a callback error, like every other read.
+func TestGetByUniqueIndex_PropagatesCallbackError(t *testing.T) {
+	d := openTempDB(t)
+	h := humanHandler(t, d, 0)
+	putRow(t, d, h, test.Human{Id: uuid.New(), Name: "c", Email: "c@x.com", Status: "ok"})
+
+	boom := errors.New("boom")
+	err := d.View(func(tx Transaction) error {
+		return h.GetByUniqueIndex(tx, emailIDx, []byte("c@x.com"), func(view *ds.Human) error {
+			return boom
+		})
+	})
+	require.ErrorIs(t, err, boom)
+
+	// ...and a callback that succeeds still reports success.
+	require.NoError(t, d.View(func(tx Transaction) error {
+		return h.GetByUniqueIndex(tx, emailIDx, []byte("c@x.com"), func(view *ds.Human) error {
+			return nil
+		})
+	}))
+}
+
+// Both scans must stop on ErrStopIteration and report success, not the sentinel.
+func TestErrStopIteration_EndsScansWithoutError(t *testing.T) {
+	d := openTempDB(t)
+	h := humanHandler(t, d, 0)
+	seedRows(t, d, h, 40) // 20 of them have status "ok"
+
+	t.Run("Iterate", func(t *testing.T) {
+		seen := 0
+		require.NoError(t, d.View(func(tx Transaction) error {
+			return h.Iterate(tx, func(view *ds.Human) error {
+				seen++
+				if seen == 3 {
+					return ErrStopIteration
+				}
+				return nil
+			})
+		}))
+		require.Equal(t, 3, seen, "Iterate kept going after ErrStopIteration")
+	})
+
+	t.Run("IterateByMatchIndex", func(t *testing.T) {
+		seen := 0
+		require.NoError(t, d.View(func(tx Transaction) error {
+			return h.IterateByMatchIndex(tx, statusIDx, []byte("ok"), func(view *ds.Human) error {
+				seen++
+				if seen == 2 {
+					return ErrStopIteration
+				}
+				return nil
+			})
+		}))
+		require.Equal(t, 2, seen, "IterateByMatchIndex kept going after ErrStopIteration")
+	})
+
+	t.Run("wrapped sentinel is recognized", func(t *testing.T) {
+		seen := 0
+		require.NoError(t, d.View(func(tx Transaction) error {
+			return h.Iterate(tx, func(view *ds.Human) error {
+				seen++
+				return fmt.Errorf("caller ran out of budget: %w", ErrStopIteration)
+			})
+		}))
+		require.Equal(t, 1, seen)
+	})
+
+	t.Run("any other error is returned as is", func(t *testing.T) {
+		boom := errors.New("boom")
+		err := d.View(func(tx Transaction) error {
+			return h.Iterate(tx, func(view *ds.Human) error { return boom })
+		})
+		require.ErrorIs(t, err, boom)
+	})
+}
+
+// The documented cancellation pattern: watch ctx, return ErrStopIteration.
+func TestErrStopIteration_HonoursContextCancellation(t *testing.T) {
+	d := openTempDB(t)
+	h := humanHandler(t, d, 0)
+	seedRows(t, d, h, 100)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	seen := 0
+	require.NoError(t, d.View(func(tx Transaction) error {
+		return h.Iterate(tx, func(view *ds.Human) error {
+			select {
+			case <-ctx.Done():
+				return ErrStopIteration
+			default:
+			}
+			seen++
+			if seen == 10 {
+				cancel() // something elsewhere gives up
+			}
+			return nil
+		})
+	}))
+	require.Equal(t, 10, seen, "scan did not stop at cancellation")
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
 // An id of length zero would collide with the table's value prefix.
 func TestPutItem_RejectsZeroLengthID(t *testing.T) {
 	d := openTempDB(t)
@@ -314,8 +413,8 @@ type emptyIDTable struct{ *HumanTable }
 func (t *emptyIDTable) TableName() string               { return "empty_id" }
 func (t *emptyIDTable) StoreMeta() ItemMeta[test.Human] { return emptyIDStoreMeta{} }
 
-// Badger holds a value slice until commit, so the id written into an index must
-// not alias a struct the caller can still change.
+// Badger holds the value until commit, so an indexed id must not alias a struct
+// the caller can still change.
 func TestPutItem_IndexKeepsIDAcrossLaterMutation(t *testing.T) {
 	d := openTempDB(t)
 	h := humanHandler(t, d, 0)
@@ -333,9 +432,10 @@ func TestPutItem_IndexKeepsIDAcrossLaterMutation(t *testing.T) {
 
 	found := false
 	require.NoError(t, d.View(func(tx Transaction) error {
-		return h.GetByUniqueIndex(tx, emailIDx, []byte("m@x.com"), func(view *ds.Human) {
+		return h.GetByUniqueIndex(tx, emailIDx, []byte("m@x.com"), func(view *ds.Human) error {
 			found = true
 			require.Equal(t, original[:], view.IdBytes())
+			return nil
 		})
 	}))
 	require.True(t, found, "unique index entry did not survive the caller mutating the id")

@@ -4,14 +4,12 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
-// BadgerStore wraps a Badger database and hands out the transactions that
-// Handler methods run in.
+// BadgerStore wraps a Badger database and hands out transactions.
 type BadgerStore struct {
 	DB *badger.DB
 }
 
-// NewBadgerStore wraps an already-open Badger database. It does not take
-// ownership of db beyond Close.
+// NewBadgerStore wraps an already-open Badger database.
 func NewBadgerStore(db *badger.DB) *BadgerStore {
 	return &BadgerStore{DB: db}
 }
@@ -36,8 +34,7 @@ func (b *BadgerStore) View(f func(tx Transaction) error) error {
 	})
 }
 
-// Update runs f in a read-write transaction, committing it if f returns nil and
-// discarding everything it wrote otherwise.
+// Update runs f in a read-write transaction, committing only if f returns nil.
 func (b *BadgerStore) Update(f func(tx Transaction) error) error {
 	err := b.DB.Update(func(tn *badger.Txn) error {
 		return f(&txnImpl{raw: tn})

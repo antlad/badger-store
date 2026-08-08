@@ -10,21 +10,16 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
-// ItemID is a record's primary key. Ids are written into keys verbatim, so
-// every id in a table should have the same length - see the package docs.
+// ItemID is a record's primary key. All ids in a table should be the same length.
 type ItemID []byte
 
 // IndexType selects how a secondary index behaves.
 type IndexType int
 
 const (
-	// Unique allows at most one record per index value. PutItem fails with
-	// ErrUniqueConstraintViolation if another record already holds the value.
-	// Look records up with Handler.GetByUniqueIndex.
+	// Unique allows at most one record per index value.
 	Unique IndexType = iota
-	// Match allows many records per index value. Iterate the matches with
-	// Handler.IterateByMatchIndex or remove them with
-	// Handler.DeleteByMatchingIndex.
+	// Match allows many records per index value.
 	Match
 )
 
@@ -36,13 +31,10 @@ var (
 	valueByte  = byte('v')
 )
 
-// rebuildMarker names keys that record "this index was dropped and is being
-// rebuilt". They live under the table's meta prefix, next to the "meta" key.
+// rebuildMarker keys record an index that was dropped and not yet rebuilt.
 const rebuildMarker = "rebuild:"
 
-// TableMeta is the schema snapshot stored on disk for a table. Handler.Init
-// compares it against the schema the running code declares to decide what to
-// migrate.
+// TableMeta is the schema stored on disk for a table.
 type TableMeta struct {
 	Name    string      `json:"name"`
 	Version int         `json:"version"`
@@ -50,65 +42,66 @@ type TableMeta struct {
 }
 
 // IndexDesc describes one secondary index. Changing either field makes the next
-// Handler.Init drop the index and rebuild it from the table's records.
+// Handler.Init rebuild it.
 type IndexDesc struct {
 	IdxType IndexType `json:"type"`
 	Version int       `json:"version"`
 }
 
-// IndexesDesc maps index name to its definition. Index names are written into
-// keys verbatim, so no name may be a prefix of another in the same table.
+// IndexesDesc maps index name to its definition. No name may be a prefix of
+// another in the same table.
 type IndexesDesc map[string]IndexDesc
 
-// Transaction is a Badger transaction as handed to Handler methods. Obtain one
+// Transaction is a Badger transaction as handed to Handler methods. Get one
 // from BadgerStore.View or BadgerStore.Update.
 type Transaction interface {
 	// AppendRef keeps a reference alive for the lifetime of the transaction.
 	//
-	// Deprecated: it protects nothing - Badger already retains the slices it is
-	// given until commit. It remains only so the interface stays compatible.
+	// Deprecated: Badger already retains the slices it is given until commit.
 	AppendRef(interface{})
 	// Raw exposes the underlying Badger transaction.
 	Raw() *badger.Txn
 }
 
-// ItemMeta reads the indexable parts of a record. It is implemented twice per
-// record type - once over the Store type and once over the View type - because
-// the library must be able to recompute a record's index entries from stored
-// bytes, on update, delete and migration, without decoding into a Go struct.
+// ItemMeta reads the id and index values of a record. It is implemented twice
+// per record type, once over Store and once over View, so the store can rebuild
+// index entries from stored bytes without decoding them.
+//
+// The two must return identical bytes for every index. Entries are written from
+// the Store side and deleted from the View side, so if they drift the delete
+// targets a key that was never written: the stale entry survives and lookups
+// return wrong rows. Nothing detects this - no error is reported anywhere.
 type ItemMeta[T any] interface {
 	// ID returns the record's primary key.
 	ID(*T) ItemID
-	// IndexValue returns the value to index under indexName, or nil/empty to
-	// leave this record out of that index.
+	// IndexValue returns the value to index under indexName. Empty means "leave
+	// this record out of that index".
 	IndexValue(t *T, indexName string) []byte
 }
 
-// Meta describes one record type to the store: how it is named, versioned,
-// serialized, viewed and indexed.
+// Meta describes one record type: how it is named, versioned, serialized,
+// viewed and indexed.
 type Meta[View any, Store any] interface {
 	// TableName is the key namespace for this record type. No table name may be
-	// a prefix of another, because dropping a table drops its key prefix.
+	// a prefix of another.
 	TableName() string
 	// Version is the table's schema version.
 	Version() int
-	// TakeView returns a read accessor over stored bytes. The bytes are only
-	// valid for the duration of the callback they were handed to.
+	// TakeView returns a read accessor over stored bytes, valid only for the
+	// duration of the callback they were handed to.
 	TakeView([]byte) (*View, error)
-	// Serialize encodes a record. It must return a slice the store may keep:
-	// Badger holds it until commit, so a reused builder buffer must be copied.
-	// It must also be safe to call from however many goroutines write records.
+	// Serialize encodes a record. It must return a slice the store may keep,
+	// and must be safe for concurrent use.
 	Serialize(*Store) ([]byte, error)
 	// Indexes declares the secondary indexes for this table.
 	Indexes() IndexesDesc
-	// StoreMeta reads ids and index values from a record being written.
+	// StoreMeta reads a record being written.
 	StoreMeta() ItemMeta[Store]
-	// ViewMeta reads ids and index values from stored bytes.
+	// ViewMeta reads stored bytes.
 	ViewMeta() ItemMeta[View]
 }
 
-// Handler is the typed entry point for one record type. Create it with
-// NewHandler and call Init once at startup before using it.
+// Handler is the entry point for one record type. Call Init once at startup.
 type Handler[View any, Store any] struct {
 	db        *badger.DB
 	meta      Meta[View, Store]
@@ -117,9 +110,7 @@ type Handler[View any, Store any] struct {
 	indexes   IndexesDesc
 }
 
-// IsStopIteration reports whether err is the sentinel an iteration callback
-// returns to stop early. Iterate and IterateByMatchIndex swallow it and return
-// nil.
+// IsStopIteration reports whether err is or wraps ErrStopIteration.
 func IsStopIteration(err error) bool {
 	return errors.Is(err, ErrStopIteration)
 }
@@ -129,8 +120,8 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, badger.ErrKeyNotFound)
 }
 
-// NewHandler builds a handler for the record type described by meta. It reads
-// StoreMeta, ViewMeta and Indexes once, so those must not change afterwards.
+// NewHandler builds a handler for the record type described by meta. StoreMeta,
+// ViewMeta and Indexes are read once, so they must not change afterwards.
 func NewHandler[View any, Store any](db *badger.DB, meta Meta[View, Store]) *Handler[View, Store] {
 	return &Handler[View, Store]{
 		db:        db,
@@ -181,24 +172,20 @@ func (b *Handler[View, Store]) SaveTableMeta() error {
 	return b.db.Update(b.writeTableMeta)
 }
 
-// Init reconciles the schema on disk with the one the running code declares,
-// and records the result. Call it once per handler at startup:
+// Init brings the indexes on disk in line with the ones the code declares, and
+// records the new schema. Call it once per handler at startup:
 //
 //	err := store.Update(handler.Init)
 //
-// An index that disappeared from Indexes has its keys dropped. An index whose
-// type or version changed is dropped and rebuilt from the table's records. An
-// unchanged index is left alone.
+// An index dropped from Indexes has its keys removed; one whose type or version
+// changed is rebuilt from the table's records; an unchanged one is left alone.
 //
-// Call it before serving traffic. Dropping an index prefix blocks every write
-// to the database for its duration, so concurrent commits elsewhere can fail
-// with badger.ErrBlockedWrites; on a read-only database Init returns an error.
+// Run it before serving traffic: dropping an index prefix blocks writes to the
+// whole database, so concurrent commits can fail with badger.ErrBlockedWrites.
+// On a read-only database Init returns an error.
 //
-// The new schema is written on tx, last, so it becomes durable only if the
-// caller commits. Dropping and rebuilding happen outside tx - they are far too
-// large to fit in one transaction - so a migration that fails or whose
-// transaction rolls back leaves a marker behind, and the next Init redoes that
-// index rather than leaving it dropped and empty.
+// A migration that fails, or whose transaction rolls back, records nothing and
+// is redone by the next Init.
 func (b *Handler[View, Store]) Init(tx Transaction) error {
 	metaFound := true
 	oldMeta, err := b.LoadTableMeta()
@@ -225,9 +212,7 @@ func (b *Handler[View, Store]) Init(tx Transaction) error {
 		return b.writeTableMeta(tx.Raw())
 	}
 
-	// Markers go down first, in their own transaction, so they outlive a
-	// rollback of the caller's. Without them a rebuild that never commits
-	// leaves the index dropped with nothing recording that it must be redone.
+	// Own transaction, so the markers outlive a rollback of the caller's.
 	if err = b.setRebuildMarkers(rebuild); err != nil {
 		return err
 	}
@@ -240,8 +225,7 @@ func (b *Handler[View, Store]) Init(tx Transaction) error {
 		return err
 	}
 
-	// Markers and meta land on the caller's transaction, last: the schema is
-	// recorded as migrated only if the caller commits.
+	// On the caller's transaction, last: migrated only if the caller commits.
 	if err = b.clearRebuildMarkers(tx.Raw(), rebuild); err != nil {
 		return err
 	}
@@ -249,8 +233,6 @@ func (b *Handler[View, Store]) Init(tx Transaction) error {
 }
 
 // dropRemovedIndexes removes the keys of indexes that are no longer declared.
-// It is idempotent: if the caller's transaction rolls back, the stored schema
-// still lists them and the next Init drops them again.
 func (b *Handler[View, Store]) dropRemovedIndexes(old, current IndexesDesc) error {
 	for k := range old {
 		if _, ok := current[k]; ok {
@@ -263,9 +245,8 @@ func (b *Handler[View, Store]) dropRemovedIndexes(old, current IndexesDesc) erro
 	return nil
 }
 
-// planRebuild lists, in a deterministic order, the indexes that must be built
-// from the table's records: the ones whose definition changed, and the ones a
-// marker says an earlier Init dropped without finishing.
+// planRebuild lists the indexes to rebuild: those whose definition changed, and
+// those an earlier Init dropped without finishing.
 func planRebuild(old, current IndexesDesc, pending map[string]struct{}, metaFound bool) []string {
 	var rebuild []string
 	for k, v := range current {
@@ -285,13 +266,12 @@ func planRebuild(old, current IndexesDesc, pending map[string]struct{}, metaFoun
 	return rebuild
 }
 
-// dropStaleIndexes clears whatever the indexes about to be rebuilt hold today.
-// An index that never existed has nothing to drop.
+// dropStaleIndexes clears what the indexes about to be rebuilt hold today.
 func (b *Handler[View, Store]) dropStaleIndexes(rebuild []string, old IndexesDesc, pending map[string]struct{}) error {
 	for _, k := range rebuild {
 		_, existed := old[k]
 		if _, stale := pending[k]; !existed && !stale {
-			continue
+			continue // never existed, nothing to drop
 		}
 		if err := b.db.DropPrefix(b.indexPrefix(k)); err != nil {
 			return err
@@ -300,21 +280,16 @@ func (b *Handler[View, Store]) dropStaleIndexes(rebuild []string, old IndexesDes
 	return nil
 }
 
-// rebuildIndexes writes the entries for names in a single pass over the table.
+// rebuildIndexes writes the entries for names in one pass over the table.
 //
-// The entries go through a WriteBatch rather than the caller's transaction:
-// one transaction cannot hold more than badger's MaxBatchCount entries, so
-// rebuilding a table of any real size would fail with ErrTxnTooBig. A
-// WriteBatch commits in chunks and has no such ceiling. The rebuild is
-// therefore durable independently of the caller - which is what the rebuild
-// markers exist to make recoverable.
+// It uses a WriteBatch, not the caller's transaction, which caps at badger's
+// MaxBatchCount entries: a real table would fail with ErrTxnTooBig.
 func (b *Handler[View, Store]) rebuildIndexes(t Transaction, names []string, indexes IndexesDesc) error {
 	wb := b.db.NewWriteBatch()
 	defer wb.Cancel()
 
 	err := b.Iterate(t, func(view *View) error {
-		// copy: view bytes are only valid inside this callback, and the batch
-		// holds on to whatever it is given until the chunk commits
+		// copy: view bytes die with the callback, the batch keeps them to commit
 		id := append(ItemID(nil), b.viewMeta.ID(view)...)
 		for _, name := range names {
 			indexVal := b.viewMeta.IndexValue(view, name)
@@ -350,8 +325,8 @@ func (b *Handler[View, Store]) rebuildMarkerKey(indexName string) []byte {
 	return append(b.rebuildMarkerPrefix(), []byte(indexName)...)
 }
 
-// loadRebuildMarkers reports the indexes an earlier Init dropped without
-// recording a completed rebuild.
+// loadRebuildMarkers reports the indexes an earlier Init dropped but did not
+// finish rebuilding.
 func (b *Handler[View, Store]) loadRebuildMarkers() (map[string]struct{}, error) {
 	prefix := b.rebuildMarkerPrefix()
 	markers := make(map[string]struct{})
@@ -392,10 +367,9 @@ func (b *Handler[View, Store]) clearRebuildMarkers(tx *badger.Txn, names []strin
 	return nil
 }
 
-// PutItem inserts or replaces a record and brings every index into line with
-// it, all within t. It returns ErrEmptyID if the record has no primary key, and
-// ErrUniqueConstraintViolation if a different record already holds one of its
-// unique index values.
+// PutItem inserts or replaces a record and updates its index entries, all
+// within t. Returns ErrEmptyID if the record has no primary key, and
+// ErrUniqueConstraintViolation if another record holds one of its unique values.
 func (b *Handler[View, Store]) PutItem(t Transaction, item *Store) error {
 	if err := b.checkConstraints(t.Raw(), item); err != nil {
 		return err
@@ -459,8 +433,7 @@ func (b *Handler[View, Store]) matchIndexKey(name string, indexValue []byte, id 
 }
 
 func (b *Handler[View, Store]) checkConstraints(tx *badger.Txn, item *Store) error {
-	// len, not nil: a zero-length id would build an item key identical to the
-	// table's value prefix
+	// len, not nil: an empty id builds a key equal to the table's value prefix
 	if len(b.storeMeta.ID(item)) == 0 {
 		return ErrEmptyID
 	}
@@ -543,8 +516,7 @@ func (b *Handler[View, Store]) afterPut(tx *badger.Txn, item *Store) error {
 		}
 
 		if id == nil {
-			// copy: badger keeps the value slice until commit, so it must not
-			// alias memory the caller can still change
+			// copy: badger keeps the slice until commit, the caller may reuse it
 			id = append(ItemID(nil), b.storeMeta.ID(item)...)
 		}
 		var err error
@@ -584,12 +556,12 @@ func (b *Handler[View, Store]) onDelete(tx *badger.Txn, item *View) error {
 	return nil
 }
 
-// GetByUniqueIndex looks a record up through a Unique index and passes a view
-// of it to cb. It returns ErrEmptyIndexValue for an empty value, and an error
-// for which IsNotFound reports true when nothing holds the value.
+// GetByUniqueIndex passes the record holding indexValue to cb. Returns
+// ErrEmptyIndexValue for an empty value, a not-found error if nothing holds it,
+// and cb's error unchanged.
 //
-// The view and everything reachable from it are only valid inside cb.
-func (b *Handler[View, Store]) GetByUniqueIndex(t Transaction, indexName string, indexValue []byte, cb func(view *View)) error {
+// The view is only valid inside cb.
+func (b *Handler[View, Store]) GetByUniqueIndex(t Transaction, indexName string, indexValue []byte, cb func(view *View) error) error {
 	if len(indexValue) == 0 {
 		return ErrEmptyIndexValue
 	}
@@ -608,8 +580,7 @@ func (b *Handler[View, Store]) GetByUniqueIndex(t Transaction, indexName string,
 			if err != nil {
 				return err
 			}
-			cb(v)
-			return nil
+			return cb(v)
 		})
 	})
 	return err
@@ -625,7 +596,7 @@ func iteratorOpts(prefix []byte) badger.IteratorOptions {
 // Returning ErrStopIteration from cb ends the scan without an error; any other
 // error is returned as is.
 //
-// The view and everything reachable from it are only valid inside cb.
+// The view is only valid inside cb.
 func (b *Handler[View, Store]) Iterate(t Transaction, cb func(view *View) error) error {
 	it := t.Raw().NewIterator(iteratorOpts(b.valuesPrefix()))
 	defer it.Close()
@@ -653,7 +624,7 @@ func (b *Handler[View, Store]) Iterate(t Transaction, cb func(view *View) error)
 // indexKey. Returning ErrStopIteration from cb ends the scan without an error.
 // Index entries whose record has gone are skipped.
 //
-// The view and everything reachable from it are only valid inside cb.
+// The view is only valid inside cb.
 func (b *Handler[View, Store]) IterateByMatchIndex(t Transaction, indexName string, indexKey []byte, cb func(view *View) error) error {
 	matchPrefix := b.matchIndexPrefix(indexName, indexKey)
 	it := t.Raw().NewIterator(iteratorOpts(matchPrefix))
@@ -662,11 +633,9 @@ func (b *Handler[View, Store]) IterateByMatchIndex(t Transaction, indexName stri
 	for it.Rewind(); it.Valid(); it.Next() {
 		entry := it.Item()
 		err := entry.Value(func(val []byte) error {
-			// A match key is matchPrefix+id and the entry's value is that same
-			// id, so an exact hit has len(key) == len(matchPrefix)+len(id).
-			// Anything longer is a row whose index value merely *starts* with
-			// the requested one - a different value, so skip it. One integer
-			// compare; see "Design constraints" in the README.
+			// The key is matchPrefix+id and val is that id, so an exact hit is
+			// exactly this long. Longer means the row's index value only starts
+			// with the one asked for, which is a different value.
 			if len(entry.Key()) != len(matchPrefix)+len(val) {
 				return nil
 			}
@@ -697,10 +666,10 @@ func (b *Handler[View, Store]) IterateByMatchIndex(t Transaction, indexName stri
 	return nil
 }
 
-// GetByID looks a record up by primary key and passes a view of it to cb. It
-// returns an error for which IsNotFound reports true if there is no such record.
+// GetByID passes the record with the given primary key to cb, or returns a
+// not-found error.
 //
-// The view and everything reachable from it are only valid inside cb.
+// The view is only valid inside cb.
 func (b *Handler[View, Store]) GetByID(t Transaction, id ItemID, cb func(view *View) error) error {
 	item, err := t.Raw().Get(b.itemKey(id))
 	if err != nil {
@@ -715,18 +684,15 @@ func (b *Handler[View, Store]) GetByID(t Transaction, id ItemID, cb func(view *V
 	})
 }
 
-// DeleteTable drops every key belonging to this table - records, indexes and
-// metadata - in its own transaction. It blocks writes to the whole database
-// while it runs.
+// DeleteTable drops every key of this table - records, indexes and metadata -
+// in its own transaction. Blocks writes to the whole database while it runs.
 func (b *Handler[View, Store]) DeleteTable() error {
 	return b.db.DropPrefix(b.tableName())
 }
 
-// DeleteItems deletes each record and its index entries. Ids that are not
-// present are skipped.
-//
-// All the deletes go into t, so a large batch can outgrow one transaction and
-// fail with badger.ErrTxnTooBig; delete in chunks if the list may be long.
+// DeleteItems deletes each record and its index entries, skipping ids that are
+// not present. All the deletes go into t, so a long list can fail with
+// badger.ErrTxnTooBig - delete in chunks.
 func (b *Handler[View, Store]) DeleteItems(t Transaction, items []ItemID) error {
 	for _, e := range items {
 		if err := b.DeleteItem(t, e); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
@@ -737,10 +703,8 @@ func (b *Handler[View, Store]) DeleteItems(t Transaction, items []ItemID) error 
 }
 
 // DeleteByMatchingIndex deletes every record whose Match index value equals
-// indexKey, together with their index entries.
-//
-// It collects the matching ids first and then deletes them in t, so both memory
-// use and transaction size grow with the number of matches.
+// indexKey. Ids are collected first and deleted in t, so memory and transaction
+// size both grow with the number of matches.
 func (b *Handler[View, Store]) DeleteByMatchingIndex(t Transaction, indexName string, indexKey []byte) error {
 	var IDs []ItemID
 	if err := b.IterateByMatchIndex(t, indexName, indexKey, func(view *View) error {

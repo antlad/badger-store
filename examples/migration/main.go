@@ -1,9 +1,7 @@
 // Command migration is a tour of index versioning: go run ./examples/migration
 //
-// It opens one database four times, each time declaring a slightly different
-// schema, the way successive deploys of a service would. Records are written
-// once, in the first generation, and never touched again - everything that
-// happens to the indexes afterwards is done by Init.
+// It opens one database four times, each declaring a different schema, the way
+// successive deploys would. Records are written only by the first one.
 package main
 
 import (
@@ -26,9 +24,7 @@ const (
 	statusIdx = "st" // match
 )
 
-// schema is one generation of the table definition - what a given deploy of the
-// service declares. Init's whole job is to reconcile the previous generation
-// stored on disk with this one.
+// schema is what one deploy declares. Init reconciles it with what is on disk.
 type schema struct {
 	version       int  // table version
 	withEmail     bool // is the unique e-mail index declared at all?
@@ -71,9 +67,8 @@ func (t *humanTable) Indexes() bstore.IndexesDesc {
 func (t *humanTable) StoreMeta() bstore.ItemMeta[test.Human] { return storeMeta{t.schema} }
 func (t *humanTable) ViewMeta() bstore.ItemMeta[ds.Human]    { return viewMeta{t.schema} }
 
-// The two ItemMeta implementations must agree: one reads index values from a
-// record being written, the other from bytes already on disk. A rebuild goes
-// through the view side, so if they ever drift the index quietly goes wrong.
+// The two ItemMeta implementations must agree - a rebuild goes through the view
+// side, so if they drift the index quietly goes wrong.
 type storeMeta struct{ schema }
 
 func (storeMeta) ID(h *test.Human) bstore.ItemID { return h.Id[:] }
@@ -109,8 +104,7 @@ func (s schema) indexedStatus(status string) string {
 	return status
 }
 
-// rows are written once, by the first generation. Statuses are equal length on
-// purpose: match-index values must not be prefixes of one another.
+// Statuses are equal length on purpose - see docs/concepts.md.
 var rows = []test.Human{
 	{Id: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Age: 36, Name: "Alice", Email: "alice@example.com", Status: "active"},
 	{Id: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Age: 41, Name: "Bob", Email: "bob@example.com", Status: "paused"},
@@ -130,8 +124,7 @@ func run() error {
 	}
 	defer os.RemoveAll(dir)
 
-	// Generation 1: only a match index on status. There is no way to look a
-	// record up by e-mail yet.
+	// Generation 1: a match index on status. No way to look up by e-mail yet.
 	err = deploy(dir, schema{version: 1, withStatus: true, statusVersion: 1},
 		func(store *bstore.BadgerStore, h *handler) error {
 			fmt.Println("writing the records (this is the only generation that writes)")
@@ -151,8 +144,7 @@ func run() error {
 		return err
 	}
 
-	// Generation 2: add a unique index on e-mail. Init scans the table and
-	// builds it over records that were written before it existed.
+	// Generation 2: add a unique e-mail index. Init builds it over existing rows.
 	err = deploy(dir, schema{version: 2, withStatus: true, statusVersion: 1, withEmail: true},
 		func(store *bstore.BadgerStore, h *handler) error {
 			return report(store, h, "active", "carol@example.com")
@@ -161,9 +153,8 @@ func run() error {
 		return err
 	}
 
-	// Generation 3: the status index now stores upper case. The values on disk
-	// are wrong for the new rule, so the index version is bumped and Init drops
-	// and rebuilds it. Note the lookup key changes with it.
+	// Generation 3: status is now indexed upper-cased, so the version is bumped
+	// and Init rebuilds it. The lookup key changes with it.
 	err = deploy(dir, schema{version: 3, withStatus: true, statusVersion: 2, upperStatus: true, withEmail: true},
 		func(store *bstore.BadgerStore, h *handler) error {
 			if err := report(store, h, "active", "carol@example.com"); err != nil {
@@ -184,8 +175,7 @@ func run() error {
 
 type handler = bstore.Handler[ds.Human, test.Human]
 
-// deploy opens the database, runs Init for the given schema, then hands the
-// store to fn - the shape of a service starting up.
+// deploy opens the database, runs Init, then hands the store to fn.
 func deploy(dir string, s schema, fn func(*bstore.BadgerStore, *handler) error) error {
 	fmt.Printf("\n=== deploy: table v%d, indexes %v ===\n", s.version,
 		indexNames(&humanTable{schema: s}))
@@ -202,8 +192,7 @@ func deploy(dir string, s schema, fn func(*bstore.BadgerStore, *handler) error) 
 		builder: flatbuffers.NewBuilder(1024),
 	})
 
-	// One transaction: Init records the new schema only if it commits, and a
-	// migration that fails is redone by the next start.
+	// Init records the new schema only if this transaction commits.
 	if err := store.Update(h.Init); err != nil {
 		return fmt.Errorf("init: %w", err)
 	}
@@ -233,9 +222,10 @@ func report(store *bstore.BadgerStore, h *handler, status, email string) error {
 		if email == "" {
 			return nil
 		}
-		err = h.GetByUniqueIndex(tx, emailIdx, []byte(email), func(v *ds.Human) {
+		err = h.GetByUniqueIndex(tx, emailIdx, []byte(email), func(v *ds.Human) error {
 			fmt.Printf("  unique email=%q -> %s (written before this index existed)\n",
 				email, v.Name())
+			return nil
 		})
 		if bstore.IsNotFound(err) {
 			fmt.Printf("  unique email=%q -> not found\n", email)

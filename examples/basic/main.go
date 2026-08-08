@@ -142,8 +142,9 @@ func run() error {
 
 	fmt.Println("\n== get by unique index (email) ==")
 	if err := store.View(func(tx bstore.Transaction) error {
-		return handler.GetByUniqueIndex(tx, emailIdx, []byte("carol@example.com"), func(v *ds.Human) {
+		return handler.GetByUniqueIndex(tx, emailIdx, []byte("carol@example.com"), func(v *ds.Human) error {
 			fmt.Printf("found %s\n", v.Name())
+			return nil
 		})
 	}); err != nil {
 		return err

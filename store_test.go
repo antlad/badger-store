@@ -189,9 +189,10 @@ func TestIndexMigrate(t *testing.T) {
 
 		// The unique index was rebuilt.
 		found := false
-		if err = h.GetByUniqueIndex(tx, emailIDx, []byte(h1.Email), func(view *ds.Human) {
+		if err = h.GetByUniqueIndex(tx, emailIDx, []byte(h1.Email), func(view *ds.Human) error {
 			found = true
 			checkViewMatch(t, h1, view)
+			return nil
 		}); err != nil {
 			return err
 		}
@@ -390,7 +391,8 @@ func TestIndexUpdate(t *testing.T) {
 	})
 
 	err = d.View(func(tx Transaction) error {
-		err = h.GetByUniqueIndex(tx, nameIDx, []byte("missing"), func(view *ds.Human) {
+		err = h.GetByUniqueIndex(tx, nameIDx, []byte("missing"), func(view *ds.Human) error {
+			return nil
 		})
 		require.ErrorIs(t, err, badger.ErrKeyNotFound)
 		err = h.GetByID(tx, []byte{1, 2, 3}, func(view *ds.Human) error {
@@ -410,9 +412,11 @@ func TestIndexUpdate(t *testing.T) {
 	err = d.Update(func(tx Transaction) error {
 		h1 := items[3]
 		original := h1
-		err = h.GetByUniqueIndex(tx, emailIDx, []byte(h1.Email), func(view *ds.Human) {
+		err = h.GetByUniqueIndex(tx, emailIDx, []byte(h1.Email), func(view *ds.Human) error {
 			checkViewMatch(t, h1, view)
+			return nil
 		})
+		require.NoError(t, err)
 		h1.Email = "new_email@mail.com"
 		h1.Status = "some"
 
@@ -427,7 +431,8 @@ func TestIndexUpdate(t *testing.T) {
 		})
 		require.Equal(t, 4, count)
 
-		err = h.GetByUniqueIndex(tx, emailIDx, []byte(original.Email), func(view *ds.Human) {
+		err = h.GetByUniqueIndex(tx, emailIDx, []byte(original.Email), func(view *ds.Human) error {
+			return nil
 		})
 		require.ErrorIs(t, err, badger.ErrKeyNotFound)
 
