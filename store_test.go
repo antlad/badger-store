@@ -20,7 +20,7 @@ const (
 
 func NewBadgerDB(folder string) (*BadgerStore, error) {
 	opts := badger.DefaultOptions(folder)
-	opts.NumVersionsToKeep = 0
+	opts.NumVersionsToKeep = 1
 	opts.CompactL0OnClose = true
 	opts.NumLevelZeroTables = 1
 	opts.NumLevelZeroTablesStall = 2
@@ -36,8 +36,8 @@ func NewBadgerDB(folder string) (*BadgerStore, error) {
 	return d, nil
 }
 
-func prepareDB(version int, reset bool, t *testing.T) (*BadgerStore, *Handler[ds.Human, test.Human]) {
-	d, err := NewBadgerDB("/tmp/store_test")
+func prepareDB(folder string, version int, reset bool, t *testing.T) (*BadgerStore, *Handler[ds.Human, test.Human]) {
+	d, err := NewBadgerDB(folder)
 	require.NoError(t, err)
 	if reset {
 		err = d.Reset()
@@ -165,34 +165,54 @@ func checkViewMatch(t *testing.T, h test.Human, view *ds.Human) {
 }
 
 func TestIndexMigrate(t *testing.T) {
-	d, h := prepareDB(0, true, t)
+	dir := t.TempDir()
+	d, h := prepareDB(dir, 0, true, t)
 	h1 := createHuman(1)
 	err := d.Update(func(tx Transaction) error {
-
-		err := h.PutItem(tx, &h1)
-		require.NoError(t, err)
-		return nil
+		return h.PutItem(tx, &h1)
 	})
 	require.NoError(t, err)
 	d.Close()
 
-	d, h = prepareDB(1, false, t)
+	// reopen at version 1: bumped index versions force a rebuild
+	d, h = prepareDB(dir, 1, false, t)
 	defer d.Close()
+
 	err = d.View(func(tx Transaction) error {
-		return h.GetByID(tx, h1.Id[:], func(view *ds.Human) error {
+		// Value is still readable by primary key.
+		if err = h.GetByID(tx, h1.Id[:], func(view *ds.Human) error {
 			checkViewMatch(t, h1, view)
 			return nil
-		})
+		}); err != nil {
+			return err
+		}
+
+		// The unique index was rebuilt.
+		found := false
+		if err = h.GetByUniqueIndex(tx, emailIDx, []byte(h1.Email), func(view *ds.Human) {
+			found = true
+			checkViewMatch(t, h1, view)
+		}); err != nil {
+			return err
+		}
+		require.True(t, found, "unique index not rebuilt after migration")
+
+		// The match index was rebuilt.
+		cnt := 0
+		if err = h.IterateByMatchIndex(tx, statusIDx, []byte(h1.Status), func(view *ds.Human) error {
+			cnt++
+			return nil
+		}); err != nil {
+			return err
+		}
+		require.Equal(t, 1, cnt, "match index not rebuilt after migration")
+		return nil
 	})
 	require.NoError(t, err)
-
-	//err = d.Update(func(tx Transaction) error {
-	//	h1 := createHuman(0)
-	//	h1.Email = "
 }
 
 func TestBase(t *testing.T) {
-	d, h := prepareDB(0, true, t)
+	d, h := prepareDB(t.TempDir(), 0, true, t)
 	defer d.Close()
 
 	h1 := createHuman(1)
@@ -215,7 +235,7 @@ func TestBase(t *testing.T) {
 }
 
 func TestMatch(t *testing.T) {
-	d, h := prepareDB(0, true, t)
+	d, h := prepareDB(t.TempDir(), 0, true, t)
 	defer d.Close()
 
 	items := make([]test.Human, 0, 100)
@@ -311,7 +331,7 @@ func TestMatch(t *testing.T) {
 }
 
 func TestUniqueConstrain(t *testing.T) {
-	d, h := prepareDB(0, true, t)
+	d, h := prepareDB(t.TempDir(), 0, true, t)
 	defer d.Close()
 	h1 := createHuman(0)
 	h2 := createHuman(1)
@@ -355,7 +375,7 @@ func TestUniqueConstrain(t *testing.T) {
 }
 
 func TestIndexUpdate(t *testing.T) {
-	d, h := prepareDB(0, true, t)
+	d, h := prepareDB(t.TempDir(), 0, true, t)
 	defer d.Close()
 
 	items := make([]test.Human, 0, 10)

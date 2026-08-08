@@ -1,6 +1,6 @@
 module github.com/antlad/badger-store
 
-go 1.21.3
+go 1.25.0
 
 require (
 	github.com/dgraph-io/badger/v4 v4.2.0
